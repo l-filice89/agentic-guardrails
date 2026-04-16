@@ -1,0 +1,20 @@
+{
+  "name": "agentic-guardrails",
+  "description": "Production-ready governance commands, hygiene checks, and security scanners for agentic software development workflows.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Luca Filice",
+    "email": "l.filice.89@gmail.com",
+    "url": "https://github.com/l-filice89"
+  },
+  "repository": "https://github.com/l-filice89/agentic-guardrails",
+  "license": "MIT",
+  "keywords": ["governance", "security", "code-review", "hygiene"],
+  "skills": "./skills/",
+  "commands": [
+    "./commands/cleanup.md",
+    "./commands/sweep.md",
+    "./commands/security-scan.md",
+    "./commands/review.md"
+  ]
+}
