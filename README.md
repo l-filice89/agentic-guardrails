@@ -28,20 +28,41 @@ Once published, you'll be able to install directly from the official Claude Code
 
 ### Manual install
 
+Clone the repo:
+
 ```bash
-# Clone the plugin into your Claude plugins directory
 git clone https://github.com/l-filice89/agentic-guardrails.git ~/.claude/plugins/agentic-guardrails
 ```
 
-Then register it in your Claude Code settings (`~/.claude/settings.json`):
+Claude Code does not support permanently enabling local (non-marketplace) plugins via settings. Use one of the following approaches:
 
-```json
-{
-  "plugins": ["~/.claude/plugins/agentic-guardrails"]
-}
+**Option A — Shell alias (recommended)**
+
+Add to your `~/.zshrc` (or `~/.bashrc`):
+
+```bash
+alias claude='claude --plugin-dir ~/.claude/plugins/agentic-guardrails'
 ```
 
-Restart Claude Code. All four commands and the skill will be available immediately.
+Reload your shell (`source ~/.zshrc`). Commands will be available in every Claude Code session, namespaced as `/agentic-guardrails:cleanup`, `/agentic-guardrails:sweep`, etc.
+
+**Option B — Per-session flag**
+
+```bash
+claude --plugin-dir ~/.claude/plugins/agentic-guardrails
+```
+
+Use this for one-off sessions without modifying your shell config.
+
+**Option C — Standalone commands (no namespace)**
+
+Copy the command files into your user-level Claude commands directory:
+
+```bash
+cp ~/.claude/plugins/agentic-guardrails/commands/*.md ~/.claude/commands/
+```
+
+Commands will load automatically as `/cleanup`, `/sweep`, etc. — no flag or namespace needed. You lose the plugin packaging but gain the shorter names.
 
 ---
 
