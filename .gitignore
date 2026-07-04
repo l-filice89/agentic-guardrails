@@ -18,3 +18,9 @@ npm-debug.log*
 
 # Test workspace artifacts
 tests/workspace/
+
+# v2 runtime build artifacts (packages/*)
+dist/
+dist-types/
+*.tsbuildinfo
+*.stackdump

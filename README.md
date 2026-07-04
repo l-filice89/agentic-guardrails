@@ -128,6 +128,50 @@ This creates a temporary git repo pre-loaded with the fixtures and prints the co
 
 ---
 
+## v2 runtime (work in progress)
+
+This repo is being reworked into a programmatic Node/TypeScript runtime engine
+(a deterministic-first, then LLM-deepened, code review engine). The legacy
+plugin above (`commands/`, `skills/`, slash commands) **remains fully
+functional and installable exactly as documented** throughout the rework;
+nothing above changes until the legacy decommission milestone.
+
+The v2 runtime lives in a pnpm-workspaces monorepo under `packages/`:
+
+- `packages/contracts` (`@agentic-guardrails/contracts`) — the standalone,
+  dependency-free Zod schema package; the single source of truth for data
+  shapes crossing package boundaries.
+- `packages/core` (`@agentic-guardrails/core`) — the deterministic,
+  **LLM-free** analysis engine. This boundary is lint-enforced, not just
+  documented (see `docs/adr/ADR-005-contracts-package.md`).
+
+More packages (`llm`, `cli`, `action`, `plugin`) land as later stories need
+them. See `docs/adr/` for architecture decision records and `roadmap.md` for
+the milestone sequencing.
+
+**Licensing:** the legacy plugin (this file's License section, below) stays
+MIT. The v2 runtime packages under `packages/` are licensed separately under
+Apache-2.0 (declared per-package in each `package.json`); per-package
+`LICENSE` files are added at the M4 packaging milestone.
+
+### Prerequisites
+
+- Node.js 24 LTS
+- pnpm 11.x (`npm i -g pnpm@11` if you don't already have it; the
+  `packageManager` field pins the exact version CI uses)
+
+### Dev commands
+
+```bash
+pnpm install              # install workspace dependencies
+pnpm -r build             # build all packages (tsup), in topological order
+pnpm -r test              # run each package's own tests
+pnpm test                 # run the full Vitest workspace (unit + tooling + integration)
+pnpm run lint              # ESLint, scoped to packages/**/src
+pnpm run typecheck          # tsc -b (project references, typecheck-only)
+pnpm run check:boundaries    # structural dependency-boundary check (core -> contracts only)
+```
+
 ## License
 
 MIT
