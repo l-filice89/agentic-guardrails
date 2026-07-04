@@ -35,10 +35,10 @@ the tool exists.
 
 ### Requirements Overview
 
-**Functional Requirements:** 39 FRs across 7 groups. Three are pillars —
+**Functional Requirements:** 40 FRs across 7 groups (FR-40 dispositions added 2026-07-03, backported from the epic breakdown's DR-1). Three are pillars —
 (A) Knowledge substrate: git-tracked Corpus Map + Conventions Ledger, human-governed
 (FR-1–8); (B) Spec & AC runtime: SDD-as-verification-contract with coaching and a
-standalone pre-implementation gate (FR-9–13); (C) Longitudinal quality memory (FR-14–17).
+standalone pre-implementation gate (FR-9–13); (C) Longitudinal quality memory (FR-14–17, FR-40).
 Four apply/operate them — (D) six-axiom review pipeline (FR-18–25); (E) surfaces & modes
 (FR-26–30); (F) configuration & cost control (FR-31–36); (G) write-time
 `engineering-standards` skill, carried forward and axiom-aligned (FR-37–39).
@@ -120,7 +120,8 @@ the project does not need.
 ### Cross-Cutting Concerns Identified
 
 - **Finding provenance + tier is first-class M0 data, not a feature:** every finding carries
-  tier (`deterministic | inferred`), source (`ast|regex|llm`), confidence, and the exemplar it
+  tier (`deterministic | inferred`), source (`ast|regex|llm`), severity (`error|warning|info`),
+  a stable symbol-anchored `findingId`, confidence, and the exemplar it
   was judged against. CI gates on the deterministic tier by default; inferred findings advise.
 - **Zero silent degradation as an operational contract, not a slogan:** a `pass` requires
   positive evidence, never mere absence of error. Every run declares its degradation tier.
@@ -374,7 +375,7 @@ Storage is split by governance and churn, matching the artifact-folder commit po
 ### Core ↔ LLM Contract (ADR-001 — the keystone)
 
 **One Zod envelope, two transports.** A single per-axiom `<axiom>.in` / `<axiom>.out` envelope
-(carrying tier, source, confidence, exemplar provenance, and `degraded[]`) is the canonical
+(carrying tier, source, severity, `findingId`, confidence, exemplar provenance, and `degraded[]`) is the canonical
 Phase-3↔core boundary type:
 
 - **Interactive / IDE transport — file-handshake.** The LLM is the host (inversion of control), so
@@ -508,13 +509,18 @@ divergence there corrupts every downstream phase.
 
 - **One `Finding` schema, defined once in `contracts`.** Every analyzer and agent emits the same
   Zod-validated shape: `{ axiom, location, message, tier: 'deterministic'|'inferred',
-  source: 'ast'|'regex'|'llm', confidence, exemplar?, degraded? }`. No analyzer invents its own
+  source: 'ast'|'regex'|'llm', severity: 'error'|'warning'|'info', findingId, confidence,
+  exemplar?, degraded? }`. `findingId` is a **symbol-anchored content hash**
+  (`{axiom, ruleId, file, enclosing symbol/normalized context}`) so identity — and any disposition
+  attached to it — survives line drift. *(`severity` + `findingId` added 2026-07-03: FR-21's
+  strongest-severity merge, FR-30's severity breakdown, CI blocking-vs-advisory gating, and
+  disposition tracking all require them.)* No analyzer invents its own
   finding shape or an ad-hoc interface.
 - **Partial-result contract on all shared reads.** Every upstream read (import graph, ledger, corpus,
   history) returns `{ data, coverage|provenance, degraded[] }`. A consumer below its coverage/validity
   threshold returns `inconclusive` — never a false `pass`.
-- **Provenance is mandatory, never inferred late.** Findings and writes carry source, tier, exemplar,
-  and engine version at creation.
+- **Provenance is mandatory, never inferred late.** Findings and writes carry source, tier, severity,
+  `findingId`, exemplar, and engine version at creation.
 
 ### Analyzer vs Agent Boundary
 
@@ -616,7 +622,7 @@ agentic-guardrails/
 │   │       ├── config.ts         # config schema → JSON Schema (FR-31–36)
 │   │       ├── ledger.ts         # Conventions Ledger + Corpus Map (FR-1–8)
 │   │       ├── spec.ts           # Spec/AC verification contract (FR-9–13)
-│   │       ├── trends.ts         # longitudinal records        (FR-14–17)
+│   │       ├── trends.ts         # longitudinal + disposition records (FR-14–17, FR-40)
 │   │       └── index.ts
 │   ├── core/                     # LLM-FREE (lint-enforced) — deterministic engine
 │   │   └── src/
@@ -714,7 +720,7 @@ parked (see expansion-ideas EI-6).
 |---|---|
 | A — Knowledge substrate (FR-1–8) | `contracts/ledger.ts`, `core/knowledge`, `core/persistence`, `_agentic-guardrails/{conventions,corpus-map}.yaml` |
 | B — Spec & AC runtime (FR-9–13) | `contracts/spec.ts`, `core/spec` |
-| C — Longitudinal memory (FR-14–17) | `contracts/trends.ts`, `core/knowledge` (Trend Aggregator), `core/report`, `_agentic-guardrails/history/trends.jsonl` |
+| C — Longitudinal memory (FR-14–17, FR-40) | `contracts/trends.ts`, `core/knowledge` (Trend Aggregator), `core/report`, `_agentic-guardrails/history/{trends,dispositions}.jsonl` |
 | D — Six-axiom pipeline (FR-18–25) | `core/{analyzers,pipeline}` (deterministic), `llm/agents` (inferred) |
 | E — Surfaces & modes (FR-26–30) | `cli`, `action`, `plugin` |
 | F — Config & cost (FR-31–36) | `contracts/config.ts`, `core/cache`, `llm` (per-agent toggles, Ollama) |
@@ -832,7 +838,11 @@ write-back discipline, the corpus-map decision/derivation split, trend-record an
 quantified pass/fail bars on every spike gate (SPIKE-1 ≥98% post-repair; SPIKE-5 100 clean cycles +
 injected-failure suite; manifest retention 100 runs — all confirmed with the owner). Where a fix
 changed a rule, every site stating that rule was updated and verified by search, per the round-2
-propagation lesson.
+propagation lesson. **Post-completion backport (2026-07-03):** `severity` and a symbol-anchored
+`findingId` were added to the canonical `Finding` schema — a gap surfaced during the epic breakdown's
+adversarial review (OD-6): FR-21's strongest-severity merge, FR-30's severity breakdown, the CI
+blocking-vs-advisory gate, and disposition tracking all consume fields the schema previously lacked.
+All four schema-stating sites in this document were updated and verified by search.
 
 **Key Strengths:** Testable vendor-decoupling (lint-enforced, not aspirational); the
 one-envelope/two-transport keystone solves the IDE inversion-of-control problem with built-in parity;

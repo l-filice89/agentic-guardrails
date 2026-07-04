@@ -2,7 +2,7 @@
 title: 'PRD — agentic-guardrails'
 status: draft
 created: '2026-06-10'
-updated: '2026-06-10'
+updated: '2026-07-03'
 ---
 
 # PRD — agentic-guardrails
@@ -102,10 +102,11 @@ Specs as a runtime verification contract, with coaching to get authors there.
 
 The repo's quality story over time.
 
-- **FR-14** Every review records **per-axiom quality scores** in the review artifact.
-- **FR-15** The system **trends scores across runs** and reports the delta alongside current findings.
+- **FR-14** Every review records **per-axiom quality scores** in the review artifact. Scores are stored as severity-graded finding counts normalized by change size; the score itself is a **derived view computed by a versioned formula**, so historical scores are recomputable whenever the formula evolves — records are never poisoned by a formula change.
+- **FR-15** The system **trends scores across runs** and reports the delta alongside current findings (delta vs the previous run of the same scope type on the same branch; fallback: nearest ancestor commit).
 - **FR-16** The system produces **longitudinal reports** correlating quality movements over time (e.g., "DRY violations up 40% over three sprints while SDD coverage dropped").
 - **FR-17** A **ledger-health view** surfaces semantic staleness in human terms ("3 conventions waning, incidence −40%"), not just commit counts.
+- **FR-40** *(added 2026-07-03, backported from the epic breakdown where it originated as DR-1)* The system captures **human finding dispositions** (pinned enum, e.g. `actionable | not-actionable | deferred`), persisted as append-only records in committed history independent of whether the review artifact itself is kept. Dispositions are the instrumentation behind this PRD's trust metrics: the M1 gate's "≥70% dispositioned actionable" and the noise counter-metric's "<30% dispositioned not-actionable" are both measured from this data — without it, neither number exists.
 
 ### D. Six-axiom review pipeline
 

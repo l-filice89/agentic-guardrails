@@ -1,5 +1,7 @@
 ---
-stepsCompleted: [1]
+stepsCompleted: [1, 2, 3, 4]
+status: 'complete'
+completedAt: '2026-07-03'
 inputDocuments:
   - '_bmad-output/planning-artifacts/prds/prd-agentic-guardrails-2026-06-10/prd.md'
   - '_bmad-output/planning-artifacts/prds/prd-agentic-guardrails-2026-06-10/addendum.md'
@@ -187,9 +189,9 @@ This document provides the complete epic and story breakdown for agentic-guardra
 - Hybrid test layout: colocated `*.test.ts` unit tests; top-level `tests/` for integration/e2e/parity; package-local `__fixtures__/` for small golden fixtures; `tests/fixtures/` for large shared fixtures.
 - All paths via `node:path`; Windows is a first-class target; bounded concurrency via `p-map`, never unbounded `Promise.all`.
 
-**Derived requirements (gaps surfaced during epic breakdown, 2026-07-03 — recommend backporting to the PRD)**
+**Derived requirements (gaps surfaced during epic breakdown, 2026-07-03 — backported to the PRD as FR-40 on 2026-07-03)**
 
-- DR-1: Review artifacts support **human finding dispositions**, persisted in the review artifact. The disposition enum is **pinned in the `contracts` schema at the Epic 1 contracts story** (candidate set: `actionable | not-actionable | deferred`; final set is a story-level decision, then frozen). Dispositions are the data source for the PRD's trust/success metrics (UJ-2 step 5, M1 gate "≥70% dispositioned actionable") and SPIKE-4's noise counter-metric (<30% dispositioned not-actionable) — without them those metrics are unmeasurable. The artifact schema carries dispositions from Epic 1 so history never needs backfilling; the interactive capture loop matures with the surfaces in Epic 5. **Survival rule:** dispositions are *decisions*, so per the "version decisions, not derivations" rule they are recorded as **append-only disposition records in committed history — default home `history/dispositions.jsonl`** (same JSONL discipline as trend records: stable `recordId` keyed on `{run-id, findingId}` (needs OD-6's `findingId`), `commitSha`, idempotent under `merge=union`) — written post-run when the human dispositions, independent of whether the review artifact itself is committed or dropped, and immune to manifest pruning. The review artifact carries them redundantly for human reading. **Disposition scope** — whether a disposition on a `findingId` carries across its reappearances in later runs or is per-run — is defined together with SPIKE-4's noise metric, whose denominator depends on the answer.
+- DR-1 *(= PRD FR-40)*: Review artifacts support **human finding dispositions**, persisted in the review artifact. The disposition enum is **pinned in the `contracts` schema at the Epic 1 contracts story** (candidate set: `actionable | not-actionable | deferred`; final set is a story-level decision, then frozen). Dispositions are the data source for the PRD's trust/success metrics (UJ-2 step 5, M1 gate "≥70% dispositioned actionable") and SPIKE-4's noise counter-metric (<30% dispositioned not-actionable) — without them those metrics are unmeasurable. The artifact schema carries dispositions from Epic 1 so history never needs backfilling; the interactive capture loop matures with the surfaces in Epic 5. **Survival rule:** dispositions are *decisions*, so per the "version decisions, not derivations" rule they are recorded as **append-only disposition records in committed history — default home `history/dispositions.jsonl`** (same JSONL discipline as trend records: stable `recordId` keyed on `{run-id, findingId}` (needs OD-6's `findingId`), `commitSha`, idempotent under `merge=union`) — written post-run when the human dispositions, independent of whether the review artifact itself is committed or dropped, and immune to manifest pruning. The review artifact carries them redundantly for human reading. **Disposition scope** — whether a disposition on a `findingId` carries across its reappearances in later runs or is per-run — is defined together with SPIKE-4's noise metric, whose denominator depends on the answer.
 
 **Open decisions — RESOLVED with the owner (Luca) on 2026-07-03, except OD-5 (deferred)**
 
@@ -201,7 +203,7 @@ This document provides the complete epic and story breakdown for agentic-guardra
 - OD-6 ✅ *(was blocking the Epic 1 contracts story)*: **Severity enum `error | warning | info`; symbol-anchored `findingId`** = hash of `{axiom, ruleId, file, enclosing symbol / normalized context}`, so dispositions survive line drift. Backport the schema addition to the architecture document.
 - OD-7 ✅ *(was blocking the Epic 1 pipeline-composition story)*: **Streaming deferred.** CLI summary + persisted artifact are v1's two output channels; real-time IDE streaming is post-v1 (Rule of Three).
 
-**Backport tasks (owner: Luca, before any M1 gate claim is asserted):** DR-1 and the OD-1 score definition → PRD; the OD-6 `Finding` schema additions (`severity`, `findingId`) → architecture document. Otherwise the next document-driven workflow re-derives these gaps from sources that still have them.
+**Backport tasks — ✅ COMPLETED 2026-07-03:** DR-1 → PRD as **FR-40** (group C) and the OD-1 score definition folded into PRD FR-14/15; the OD-6 `Finding` schema additions (`severity`, symbol-anchored `findingId`) → architecture document (all four schema-stating sites updated and verified by search, plus the FR count, `trends.ts` mapping, and coverage table).
 
 ### UX Design Requirements
 
@@ -231,7 +233,7 @@ N/A — no UX Design document exists for this project. The only surfaces are the
 - FR-20: Epic 1 — Finding provenance + confidence (extended with `llm` source in Epic 3)
 - FR-21: Epic 1 — Dedup reduce step (deterministic-tier mechanics; cross-tier dedup exercised in Epic 3)
 - FR-22: Epic 4 — Conformance findings cite living exemplars (`corpus://…`)
-- FR-23: Epic 1 — Review artifact persisted per scope *(layout conflict between addendum and architecture flagged in Additional Requirements — resolve at story time, default: addendum's `reviews/<scope>/`)*
+- FR-23: Epic 1 — Review artifact persisted per scope *(layout conflict between addendum and architecture flagged in Additional Requirements; the default — addendum's `reviews/<scope>/` — is adopted by stories 1.4/1.15, subject to confirm-or-veto at story time)*
 - FR-24: Epic 1 — Dynamic per-phase pipeline assembly + per-axiom failure isolation
 - FR-25: Epic 1 — Review scopes (uncommitted, branch, PR, project) with worktree isolation. **PR scope in Epic 1 = locally-fetchable git refs** (worktree-isolated; `gh`-sourced metadata used when available, degrading gracefully); GitHub API integration (status checks, PR comment) is Epic 5.
 - FR-26: **Split, forward-only.** Epic 2 — SDD-elicitation and AC-remediation coaching loops (as undistributed dogfooding skills). Epic 4 — curation digest and staleness prompts. Epic 5 (primary) — the packaged, distributed Claude Code plugin integrating all loops.
@@ -248,7 +250,7 @@ N/A — no UX Design document exists for this project. The only surfaces are the
 - FR-37: Epic 5 — Write-time standards skill (precisely scoped)
 - FR-38: Epic 5 — Axiom-aligned rule set (generic baseline)
 - FR-39: **Out of v1 scope** (post-v1, named for direction) — consciously excluded from all epics
-- DR-1: Epic 1 — Disposition capture: artifact schema + CLI disposition recording (feeds SPIKE-4 and the M1 gate); interactive capture loop matures in Epic 5
+- DR-1 (= PRD FR-40): Epic 1 — Disposition capture: artifact schema + CLI disposition recording (feeds SPIKE-4 and the M1 gate); interactive capture loop matures in Epic 5
 
 ### NFR Coverage Map
 
@@ -314,3 +316,1081 @@ Teams adopt the tool through its three surfaces: the Claude Code plugin with ful
 - **Exit criteria (M4 gate → v1 launch — all gate-tier except store listing):** listed in the Claude Code Plugin Store and awesome-claude-code; ≥200 GitHub stars; ≥3 external repos with a committed `_agentic-guardrails/` folder. Counter-metrics must hold: noise rate <30% and non-increasing; time-to-first-value ≤15 minutes on a fresh repo.
 
 **FRs covered:** FR-26, FR-27, FR-28, FR-29, FR-30, FR-37, FR-38
+
+## Epic 1: Zero-Cost Deterministic Review (M0 + M1)
+
+A developer runs `guardrails init` then `guardrails review` on any scope and gets trustworthy deterministic findings with provenance and per-axiom scores, persisted as artifacts — at exactly zero LLM cost, on Windows/macOS/Linux. Internal gate order: scaffold (1.1) → walking skeleton (1.4) → scale-out; SPIKE-3 (1.5), SPIKE-5 (1.14), and SPIKE-4 (1.17) gate the stories that follow them.
+
+### Story 1.1: Monorepo Scaffold with Guarded Boundaries
+
+As a maintainer,
+I want a pnpm-workspaces monorepo whose package boundaries are lint-enforced from the first commit,
+So that the vendor-decoupling wall (`core` is LLM-free) is a build failure, not an intention.
+
+**Acceptance Criteria:**
+
+**Given** a fresh clone on Node.js 24 LTS (Windows, macOS, or Linux),
+**When** `pnpm install && pnpm -r build && pnpm -r test` runs,
+**Then** all workspace packages (`contracts`, `core` at minimum) build in topological order via TS project references,
+**And** `packageManager` and `engines` pin pnpm 11.x / Node 24, all packages are ESM-only (`"type": "module"`), and builds use tsup.
+
+**Given** any source file in `packages/core` that imports from an LLM package or SDK,
+**When** lint runs (locally or in CI),
+**Then** the forbidden-import rule fails the build with a message naming the violated boundary.
+
+**Given** a pull request to this repo,
+**When** the CI workflow runs,
+**Then** lint, typecheck, and test execute and gate the PR,
+**And** Changesets is configured for SemVer release management.
+
+### Story 1.2: Canonical Contracts Package
+
+As a dev agent implementing any analyzer or surface,
+I want every canonical schema defined once in a pure-Zod `contracts` package,
+So that all components emit identical, validated shapes and no one invents an ad-hoc interface.
+
+**Acceptance Criteria:**
+
+**Given** the `contracts` package,
+**When** its dependencies are inspected,
+**Then** `zod` is the only runtime dependency.
+
+**Given** a candidate `Finding` object,
+**When** validated with `safeParse`,
+**Then** it requires `axiom`, `location`, `message`, `tier: 'deterministic'|'inferred'`, `source: 'ast'|'regex'|'llm'`, `confidence`, `severity: 'error'|'warning'|'info'`, and `findingId`, with optional `exemplar` and `degraded` (OD-6),
+**And** an object missing `severity` or `findingId` fails validation,
+**And** the schema documents `confidence` semantics per tier: deterministic-tier findings carry the fixed maximum value (calibrated confidence is an LLM-tier concern, first populated with real values in Epic 2).
+
+**Given** the same finding recomputed after unrelated lines are added above it,
+**When** `findingId` (hash of `{axiom, ruleId, file, enclosing symbol/normalized context}`) is regenerated,
+**Then** the id is unchanged — dispositions survive line drift.
+
+**Given** the package exports,
+**When** enumerated,
+**Then** they include the partial-result contract `{ data, coverage|provenance, degraded[] }`, `RunManifest` (ledger hash, corpus hash, ruleset version, tier-enablement, engine version, model identity + `modelIdentity.source`), the ADR-001 `<axiom>.in`/`.out` envelope, the config schema with generated JSON Schema, the OD-1 trend-record schema (`recordId`, `commitSha`, per-axiom severity counts, changed-KLOC), and the DR-1 disposition-record schema (`recordId` keyed on `{run-id, findingId}`, pinned disposition enum).
+
+**Given** every persisted-artifact schema,
+**When** an artifact of version `v_n` is read by an engine at `v_n+1`,
+**Then** the forward-migration ladder upgrades it before `safeParse`, verified by a golden round-trip fixture test.
+
+### Story 1.3: TypeScript LanguageAdapter and Import Graph
+
+As a developer whose repo uses path aliases, barrels, and re-exports,
+I want a semantic, type-aware LanguageAdapter and import/dependency graph,
+So that every analyzer resolves modules the way the TypeScript compiler actually does.
+
+**Acceptance Criteria:**
+
+**Given** golden fixtures exercising path aliases, barrel files, re-exports, and dynamic imports,
+**When** the import graph is built (ts-morph),
+**Then** every edge resolves exactly as the fixture expectations specify.
+
+**Given** a file with an unresolvable import,
+**When** the graph is read,
+**Then** the partial-result contract returns `{ data, coverage, degraded[] }` with a typed degradation entry — never a throw, never silent omission.
+
+**Given** identical input,
+**When** the graph is built twice,
+**Then** the serialized output is byte-identical.
+
+**Given** any entity in the graph,
+**When** queried,
+**Then** dependency fan-in and fan-out are available (feeds the structural corpus seed in 1.8).
+
+### Story 1.4: Walking Skeleton — First End-to-End Review
+
+As a solo maintainer,
+I want one deterministic axiom running over a real diff through the real pipeline into a persisted artifact,
+So that every load-bearing joint is proven before the taxonomy scales.
+
+**Acceptance Criteria:**
+
+**Given** a git repo with uncommitted changes,
+**When** `guardrails review` runs,
+**Then** Axiom #1 (structural, minimal rule set — the full rule set arrives in 1.9) emits Zod-valid `Finding`s with `tier: deterministic`, `source: ast`, populated `severity` and `findingId`,
+**And** the review artifact is written to `_agentic-guardrails/reviews/uncommitted/` via atomic write (temp → fsync → rename), through the actual pipeline phases (0 → 1 → 4 → 5), not a harness stub.
+
+**Given** `_agentic-guardrails/` does not yet exist (this story precedes `init`, 1.8),
+**When** the artifact is written,
+**Then** the skeleton creates the minimal folder on demand — full bootstrap and git wiring remain 1.8's scope.
+
+**Given** the run completes,
+**When** the run manifest is read,
+**Then** it declares what ran, what didn't, and why (zero silent degradation, NFR-8).
+
+**Given** the same input reviewed twice,
+**When** outputs are compared,
+**Then** findings are byte-identical and sorted by `file → line → axiom`.
+
+**Given** changes under `_agentic-guardrails/`,
+**When** the diff under review is computed,
+**Then** they are excluded (self-exclusion rule).
+
+**Given** findings at or above the blocking level exist (built-in defaults at this story — the config plane arrives in 1.6),
+**When** the CLI exits,
+**Then** the exit code is nonzero; otherwise zero.
+
+### Story 1.5: SPIKE-3 — Import-Graph Cost at Scale (gate)
+
+As a maintainer making scale claims,
+I want measured import-graph build cost on a 10,000-file repo and pipeline wall-clock on ~1,000 files,
+So that NFR-1/6/13 rest on evidence and the ts-morph-vs-hybrid decision is made by numbers.
+
+**Acceptance Criteria:**
+
+**Given** a 10,000-file fixture repo,
+**When** cold and warm graph builds run under the intended `p-map` concurrency bound,
+**Then** wall-clock and peak memory are recorded, and a warm-rebuild budget is derived from the measured numbers and recorded in the spike write-up — that budget becomes the regression bound consumed by later stories.
+
+**Given** a ~1,000-file TypeScript repo,
+**When** the full deterministic pipeline runs,
+**Then** it completes in under 60 seconds (NFR-1 — hard pass/fail).
+
+**Given** the spike misses either budget,
+**When** results are written up,
+**Then** the hybrid fallback (Tree-sitter structural pass + targeted ts-morph resolution) is decided and recorded as an ADR before analyzer scale-out continues.
+
+**Given** the spike passes,
+**Then** the measured memory numbers set the `p-map` concurrency bound consumed by story 1.7, and golden-fixture resolution correctness still passes at scale.
+
+### Story 1.6: Config Plane
+
+As a user tuning the tool to my team's maturity,
+I want one schema-validated YAML config with editor autocomplete,
+So that every deviation from defaults is explicit and visible, never silent.
+
+**Acceptance Criteria:**
+
+**Given** `_agentic-guardrails/config.yaml`,
+**When** loaded,
+**Then** it is validated by the `contracts` config schema; an invalid value produces a typed error naming the offending path — never a stack trace.
+
+**Given** the generated JSON Schema,
+**When** referenced from the YAML file,
+**Then** editors provide autocomplete and inline validation (FR-31).
+
+**Given** per-axiom enforcement levels (`blocking | advisory | off`) with numeric thresholds,
+**When** a review runs,
+**Then** exit-code gating honors them, and Axiom #5 defaults to `blocking` (FR-32).
+
+**Given** any config value deviating from defaults,
+**When** a run starts,
+**Then** the deviation is logged explicitly,
+**And** no component reads config outside the validated object (sole exception: LLM API key from env, unused until Epic 2).
+
+### Story 1.7: Pipeline Hardening and Deterministic Cache
+
+As a developer running reviews all day,
+I want per-axiom failure isolation, dynamic pipeline assembly, and content-addressed caching,
+So that one broken analyzer never kills a run and unchanged inputs are near-free.
+
+**Acceptance Criteria:**
+
+**Given** an analyzer that throws mid-run,
+**When** the pipeline executes,
+**Then** all other axioms complete, the failed axiom is reported as `degraded` with a typed reason in the manifest and report header, and the run's exit code follows gating config (NFR-7/8, FR-24).
+
+**Given** scope, mode, available artifacts, and config,
+**When** the pipeline assembles,
+**Then** per-phase node membership varies accordingly while the six-phase shape stays fixed (FR-24).
+
+**Given** two findings on the same file, axiom, and >50%-overlapping line range,
+**When** the reduce step runs,
+**Then** they merge into one finding with a source array, the strongest severity, and both descriptions preserved (FR-21).
+
+**Given** unchanged inputs,
+**When** a review re-runs,
+**Then** graph and findings are served from the content-addressed cache (keyed on change + context + ruleset version + engine version + tier-enablement) and analyzer execution is skipped.
+
+**Given** the `p-map` bound from SPIKE-3 and per-phase time budgets,
+**When** a phase exceeds its budget,
+**Then** the run degrades to partials with a typed reason — never an uncaught failure.
+
+### Story 1.8: `init` and the Structural Corpus Seed
+
+As a new user on a brownfield repo,
+I want `guardrails init` to bootstrap the artifact folder, git wiring, and a structural corpus seed,
+So that my first review has structure to lean on within minutes, at zero LLM cost.
+
+**Acceptance Criteria:**
+
+**Given** a repo without `_agentic-guardrails/`,
+**When** `guardrails init` runs,
+**Then** it creates committed `config.yaml` (via a questionnaire generated from the JSON Schema), an empty-but-valid `conventions.yaml`, and `corpus-map.yaml` (human-confirmed layer, empty at init),
+**And** writes the `merge=union` gitattribute covering `history/*.jsonl` and the `.cache/` ignore entry.
+
+**Given** the import graph from 1.3,
+**When** the structural seed builds,
+**Then** entities with locations and dependency fan-in are written to the gitignored `.cache/` (regenerable; no mining attempted — FR-3 split).
+
+**Given** a subsequent review run,
+**When** Phase-0 preflight executes,
+**Then** it verifies the gitattribute and ignore entry, warning loudly with the named consequence if either is missing,
+**And** preflight adds at most 5 seconds to review start (NFR-3).
+
+**Given** `init` runs again on an initialized repo,
+**When** it completes,
+**Then** human-edited files are never clobbered (idempotent).
+
+**Given** `--no-input` (non-interactive/CI context),
+**When** `init` runs,
+**Then** the questionnaire is skipped and documented defaults are written — no prompt ever blocks.
+
+### Story 1.9: Axiom #1 — Structural Analyzer (full rule set)
+
+As a developer reviewing AI-written code,
+I want the full deterministic structural rule set for Axiom #1,
+So that architectural violations beyond the walking skeleton's minimal rules are caught at zero LLM cost (FR-18).
+
+**Acceptance Criteria:**
+
+**Given** a fixture with known structural violations (dependency-direction breaches per the import graph, disallowed cross-boundary imports, cyclic dependencies, misplaced files per the declared layout),
+**When** the analyzer runs,
+**Then** it emits exactly the expected findings with `axiom: 1`, `tier: deterministic`, `source: ast`, correct locations and severities per the fixture oracle.
+
+**Given** a clean fixture,
+**When** the analyzer runs,
+**Then** zero findings (false-positive guard, feeds the SPIKE-4 noise bar).
+
+**Given** the walking skeleton's minimal rule set (1.4),
+**When** this story lands,
+**Then** those rules are absorbed into a documented full rule set where every rule has at least one fixture case and a documented rationale.
+
+**Given** Axiom #1 set to `off` or `advisory` in config,
+**When** a review runs,
+**Then** the analyzer is skipped-and-declared or reported non-gating respectively,
+**And** identical input always yields byte-identical output.
+
+### Story 1.10: Axiom #3 — Cleanliness Analyzer (AST tier)
+
+As a developer reviewing AI-written code,
+I want deterministic AST-tier cleanliness findings,
+So that dead code, duplication, and structural mess are caught at zero LLM cost.
+
+**Acceptance Criteria:**
+
+**Given** a dirty fixture with known cleanliness violations (dead/unreachable code, unused exports, copy-paste structural duplication, excessive complexity),
+**When** the analyzer runs,
+**Then** it emits exactly the expected findings with `axiom: 3`, `tier: deterministic`, `source: ast`, correct locations and severities per the fixture oracle.
+
+**Given** a clean fixture,
+**When** the analyzer runs,
+**Then** zero findings (false-positive guard, feeds the SPIKE-4 noise bar).
+
+**Given** Axiom #3 set to `off` or `advisory` in config,
+**When** a review runs,
+**Then** the analyzer is skipped-and-declared or reported non-gating respectively,
+**And** identical input always yields byte-identical output.
+
+### Story 1.11: Axiom #4 — NFR Analyzer (structural tier)
+
+As a developer,
+I want structural-tier findings for performance and reliability hazards,
+So that unbounded concurrency, missing timeouts, and blocking-I/O-in-hot-path patterns surface deterministically.
+
+**Acceptance Criteria:**
+
+**Given** a fixture with known NFR hazards (unbounded `Promise.all` over I/O, sync filesystem calls in request paths, missing cancellation/timeout on external calls),
+**When** the analyzer runs,
+**Then** it emits exactly the expected findings with `axiom: 4`, `tier: deterministic`, correct provenance and severities per the fixture oracle.
+
+**Given** a clean fixture,
+**When** the analyzer runs,
+**Then** zero findings.
+
+**Given** the documented rule set,
+**When** reviewed,
+**Then** every rule has at least one fixture case and a documented rationale,
+**And** enforcement-level config and byte-identical determinism hold as for 1.10.
+
+### Story 1.12: Axiom #5 — Security Analyzer (regex/AST tier)
+
+As a developer,
+I want deterministic security findings that block by default,
+So that secrets, injection sinks, and dangerous APIs never ride an AI-generated diff into main.
+
+**Acceptance Criteria:**
+
+**Given** a security fixture with known violations (hardcoded secrets/tokens, SQL/command-injection sinks, `eval`-family and other dangerous APIs, unsafe deserialization),
+**When** the analyzer runs,
+**Then** it emits exactly the expected findings with `axiom: 5`, `tier: deterministic`, `source: regex|ast`, severities per the fixture oracle.
+
+**Given** default configuration,
+**When** an error-severity Axiom #5 finding exists,
+**Then** the review exits nonzero — security defaults to `blocking` (FR-32).
+
+**Given** a clean fixture,
+**When** the analyzer runs,
+**Then** zero findings,
+**And** analyzed code is parsed as data only — the analyzer never executes or dynamically requires target code.
+
+### Story 1.13: Axiom #6 — Conformance Analyzer (structural tier)
+
+As a developer on a brownfield codebase,
+I want structural conformance findings against the corpus seed,
+So that AI-written code that fights the codebase's actual shape is flagged from day one — before any convention is confirmed.
+
+**Acceptance Criteria:**
+
+**Given** a structural corpus seed (1.8) and a fixture repo with a dominant structural pattern plus a deviating diff (file placement, naming, module shape),
+**When** the analyzer runs,
+**Then** it flags the deviation with `axiom: 6`, `tier: deterministic`, and the finding message cites the prevailing pattern's prevalence evidence (full living-exemplar citations are FR-22, Epic 4).
+
+**Given** no corpus seed exists or the seed is unreadable,
+**When** the analyzer runs,
+**Then** it returns `inconclusive` with a typed reason (`no_corpus`) — never a false pass, never a crash (partial-result contract).
+
+**Given** a diff that matches the prevailing patterns,
+**When** the analyzer runs,
+**Then** zero findings,
+**And** unconfirmed conventions never produce findings (FR-5 invariant holds even at the structural tier).
+
+### Story 1.14: SPIKE-5 — Windows Git-Worktree Lifecycle (gate)
+
+As a maintainer developing on Windows,
+I want the worktree isolation lifecycle proven under failure injection,
+So that remote-scope reviews can never leak worktrees or corrupt the invoking tree (NFR-9/12).
+
+**Acceptance Criteria:**
+
+**Given** 100 consecutive create → run → cleanup cycles on Windows,
+**When** they complete,
+**Then** zero leaked worktrees, zero orphaned locks, and a byte-identical invoking working tree.
+
+**Given** the injected-failure suite — process kill mid-run, a file handle held open by another process during removal, paths >260 chars, case-collision names, push-failure → temp-dir degrade,
+**When** each scenario runs,
+**Then** every one ends with zero residue and an intact invoking tree.
+
+**Given** the spike completes,
+**When** written up,
+**Then** the Windows-specific handling required by `core/persistence` and the git wrapper is documented and consumed by story 1.15.
+
+### Story 1.15: Review Scopes — Branch, PR, and Project
+
+As a developer finishing a branch,
+I want `guardrails review` to cover branch diffs, PRs, and the full project with isolated execution,
+So that I can gate any scope without disturbing my working tree.
+
+**Acceptance Criteria:**
+
+**Given** a branch, a locally-fetchable PR ref, or `--project`,
+**When** the review runs,
+**Then** remote refs execute inside an isolated `git worktree` (per SPIKE-5's documented handling), removed in `finally` even on failure,
+**And** artifacts are written to the invoking context's `reviews/branch-{name}/`, `reviews/pr-{id}/`, or `reviews/project/` respectively.
+
+**Given** a PR reviewed in Epic 1,
+**When** metadata is needed,
+**Then** `gh`-sourced metadata is used when available and degrades gracefully when absent — no GitHub API integration (Epic 5 boundary).
+
+**Given** an interactive run completes,
+**When** the artifact-disposition prompt appears (commit-or-drop for tracked-state writes — distinct from DR-1 *finding* dispositions, which are 1.16's concern),
+**Then** the user chooses commit (`[skip ci]`) or drop — never an ambient mutation,
+**And** a push/commit failure degrades to a temp-dir save with the path reported.
+
+**Given** any scope,
+**When** the diff is computed,
+**Then** `_agentic-guardrails/` is always excluded (self-exclusion).
+
+### Story 1.16: Scores, Trends, and Dispositions
+
+As a maintainer watching my repo's quality story,
+I want per-axiom scores recorded, trended with deltas, and findings dispositionable,
+So that every run feeds the longitudinal memory and the trust metrics (FR-14/15, DR-1).
+
+**Acceptance Criteria:**
+
+**Given** a completed review,
+**When** the artifact is composed,
+**Then** per-axiom severity counts normalized by changed-KLOC are recorded, and the derived score (OD-1 formula v1: `100 − (10·E + 3·W + 1·I)/changed-KLOC`, floor 0, formula-version stamped) is rendered in the report,
+**And** changed-KLOC counts added + deleted lines and floors at 0.1 so tiny or deletion-only diffs stay finite *(edge rule proposed here — confirm with the OD-1 owner at story time; the formula is versioned precisely so this can evolve)*.
+
+**Given** a previous run of the same scope type on the same branch (fallback: nearest ancestor commit),
+**When** the report renders,
+**Then** the per-axiom delta appears alongside current findings (FR-15).
+
+**Given** run completion,
+**When** trend records append to `history/trends.jsonl`,
+**Then** writes are atomic, records carry `recordId` + `commitSha`, and the aggregator dedupes on `recordId`, orders by commit ancestry, validates-before-trust, and cold-starts on invalid history.
+
+**Given** the user dispositions findings post-run (CLI),
+**When** dispositions are recorded,
+**Then** they append to committed `history/dispositions.jsonl` keyed `{run-id, findingId}` using the pinned enum, independent of whether the review artifact was committed or dropped.
+
+**Given** `--no-input` (non-interactive/CI flag),
+**When** a review runs,
+**Then** no prompt ever blocks; disposition handling follows configured policy.
+
+**Given** `guardrails trends [--open]`,
+**When** invoked,
+**Then** a fully self-contained HTML view (inlined data, vanilla JS + inline CSS, no CDN, no network) renders the per-axiom count series and derived scores to `.cache/trends.html`.
+
+**Given** more than 100 run manifests exist under `manifests/`,
+**When** a run completes,
+**Then** manifests are pruned to the newest 100 (config-overridable) — disposition and trend records in committed history are never pruned.
+
+### Story 1.17: SPIKE-4 — Noise Metric and Labeled Fixtures (gate)
+
+As a maintainer whose product claim is trust,
+I want a defined noise metric with a labeled fixture corpus wired into CI,
+So that the <30% noise bar is measurable before anyone asserts it.
+
+**Acceptance Criteria:**
+
+**Given** the metric definition,
+**When** documented,
+**Then** it specifies the denominator (error/warning-severity findings) and the labeling method (DR-1 dispositions; disposition scope — per-run vs carried across `findingId` reappearances — is decided here and recorded).
+
+**Given** the analyzers that landed before this story (1.4, 1.9–1.13),
+**When** the metric goes live,
+**Then** their dirty/clean fixtures are folded into the labeled corpus and a retroactive noise baseline is computed per analyzer — the "foundational" inventory status is satisfied backward, not waived.
+
+**Given** a labeled fixture corpus of true and false positives (the CI proxy for the live disposition-based metric — same denominator, fixture labels standing in for dispositions),
+**When** the deterministic pipeline runs over it in CI,
+**Then** the computed noise rate is reported and the check fails at ≥30%.
+
+**Given** a new analyzer lands,
+**When** the counter-metric runs,
+**Then** the noise rate is compared against the prior baseline and flagged if increasing (the PRD's non-increasing requirement).
+
+### Story 1.18: Dogfood CI Workflow
+
+As the project itself,
+I want every PR to this repo reviewed by the tool in GitHub Actions,
+So that dogfooding starts at M1 and the M1 gate ("reviews 100% of its own PRs") is mechanically true.
+
+**Acceptance Criteria:**
+
+**Given** a PR to this repo,
+**When** the Actions workflow runs,
+**Then** `guardrails review` executes on the PR diff via direct CLI invocation (no packaged Action), deterministic-only, with `--no-input`,
+**And** blocking findings fail the check via nonzero exit.
+
+**Given** the CI suite,
+**When** it runs,
+**Then** the deterministic determinism test (same input → byte-identical findings) executes as a required check (the M1 half of the parity fixture),
+**And** run artifacts are published as workflow artifacts without committing (configured policy).
+
+**Given** this repo's size,
+**When** the dogfood review runs,
+**Then** wall-clock is under 60 seconds (the NFR-1 envelope; this repo is well under the ~1,000-file reference size).
+
+### Story 1.19: SPIKE-1 — Structured-Output Prototype (M1 signal)
+
+As a maintainer about to bet Epic 2 on the file-handshake,
+I want a throwaway harness measuring raw envelope parse-failure rates,
+So that the ADR-001 envelope is shaped while it is still cheap to change (named scaffold cost, accepted).
+
+**Acceptance Criteria:**
+
+**Given** a minimal throwaway handshake skill and the 1.2 envelope schema,
+**When** ~50 real IDE invocations run,
+**Then** the raw `safeParse` failure rate is measured and recorded.
+
+**Given** the repair/retry contract (interactive: 1 correction retry + 1 repair),
+**When** applied to the failures,
+**Then** the post-repair envelope-valid rate is reported against the ≥98% bar (≤1 failure in 50).
+
+**Given** the bar is missed,
+**When** the spike concludes,
+**Then** the envelope/prompt is simplified (or the schema split) and re-measured before Epic 2 story work begins — the spike fails closed,
+**And** the harness is deleted after write-up; only the report and envelope adjustments survive.
+
+## Epic 2: The Spec Gate — AC Validation & Verification (M2)
+
+An author validates a story's acceptance criteria before implementation and Axiom #2 verifies the implementation and tests against them afterward, with declared degradation tiers (UJ-1). Includes the minimal interactive file-handshake transport (see Epic 2's transport note in the Epic List). Depends only on Epic 1.
+
+### Story 2.1: SDD Contract and ValidatedSDD
+
+As an author,
+I want my Specification & Design Document validated into a schema-checked ValidatedSDD,
+So that acceptance criteria become a machine-comparable verification contract (FR-9).
+
+**Acceptance Criteria:**
+
+**Given** an SDD with acceptance criteria,
+**When** validation runs,
+**Then** each criterion is checked against one bar — verifiable and quantitative, not qualitative — and the result is a Zod-valid ValidatedSDD artifact persisted to committed `_agentic-guardrails/sdds/` (a validated spec is a decision per the version-decisions rule; layout addition backported to the architecture's artifact layout at this story),
+**And** each criterion carries a pass/fail verdict with a machine-readable reason for failures.
+
+**Given** an SDD with qualitative criteria ("works well", "is fast"),
+**When** validation runs,
+**Then** each failing criterion is flagged with *why* it is not machine-comparable.
+
+**Given** a document that is not an SDD at all,
+**When** validation runs,
+**Then** a typed schema error names what is missing — never a crash or a silent pass.
+
+### Story 2.2: Standalone Spec Gate (deterministic)
+
+As an author about to start implementation,
+I want `guardrails gate <spec>` to validate my spec in minutes,
+So that spec defects cost minutes instead of a rework cycle (FR-10, UJ-1 steps 1–3).
+
+**Acceptance Criteria:**
+
+**Given** a spec document and no code,
+**When** `guardrails gate` runs,
+**Then** the 2.1 validation executes standalone (no review pipeline) and reports which ACs fail and why, in under 60 seconds for a spec of up to 25 acceptance criteria.
+
+**Given** a passing spec,
+**When** the gate runs,
+**Then** the ValidatedSDD is persisted and the exit code is zero; failing specs exit nonzero.
+
+**Given** the gate runs in a context without LLM transport,
+**When** it completes,
+**Then** deterministic validation still works fully — proposed rewrites (2.4) are an additive layer, not a dependency.
+
+### Story 2.3: Interactive File-Handshake Transport
+
+As the runtime hosting LLM reasoning inside the IDE,
+I want the ADR-001 dispatch → collect file-handshake implemented,
+So that core stays LLM-free while Claude Code skills do the reasoning (FR-19 IDE transport).
+
+**Acceptance Criteria:**
+
+**Given** a run needing LLM reasoning,
+**When** core dispatches,
+**Then** it writes each `<axiom>.in.json` plus `run-state.json` (persisted phase outputs + deadline) under `.cache/handshake/<run-id>/`, prints the pending-file list, and exits.
+
+**Given** the skill has written `<axiom>.out.json` via temp → fsync → atomic rename,
+**When** `guardrails review --collect <run-id>` runs,
+**Then** out-files are `safeParse`-validated (with the required self-reported `modelIdentity`), Phases 4–5 complete the run, and the envelope-valid path produces normal findings.
+
+**Given** a missing/invalid out-file or a collect past the deadline,
+**When** collect runs,
+**Then** the axiom yields a typed `degraded` (`handshake_timeout | handshake_invalid`) with per-axiom isolation — the interactive retry budget (1 correction + 1 repair) applies before degrading.
+
+**Given** concurrent runs or an orphaned handshake dir older than the ceiling,
+**When** runs execute,
+**Then** run-scoped dirs never collide and orphans are garbage-collected at next run start,
+**And** the three-tier egress posture is documented in the README with this story (IDE transport = opt-in cloud egress).
+
+### Story 2.4: AC Elicitation Coach
+
+As an author with a missing or qualitative spec,
+I want dialogue-driven coaching to a ValidatedSDD, including proposed rewrites I can apply,
+So that I reach a verifiable spec without knowing the schema by heart (FR-11, UJ-1 steps 3–4).
+
+**Acceptance Criteria:**
+
+**Given** a spec with failing ACs,
+**When** the coaching skill runs (interactive mode only, via 2.3's handshake; JSON Schema embedded inline in the skill prompt),
+**Then** each failing criterion receives a concrete proposed rewrite into machine-comparable form.
+
+**Given** the author requests the proposed solutions be applied,
+**When** the coach applies them,
+**Then** edits touch the spec document only (never code), are presented as a reviewable diff, and are written only on explicit author acceptance — a declined proposal leaves the document byte-identical.
+
+**Given** no spec document exists at all,
+**When** the zero-document path runs,
+**Then** the dialogue builds a spec from scratch to a passing ValidatedSDD,
+**And** in headless contexts the coach is skipped-and-declared (interactive-only, FR-11).
+
+### Story 2.5: Axiom #2 — AC-to-Symbol Binding (deterministic)
+
+As a reviewer,
+I want each acceptance criterion bound to the code symbols implementing it,
+So that Axiom #2's audit has a deterministic anchor and unbound ACs surface immediately (FR-12 part 1, FR-13).
+
+**Acceptance Criteria:**
+
+**Given** a ValidatedSDD and an implementation diff,
+**When** binding runs,
+**Then** each AC is bound to code symbols via the LanguageAdapter under a documented deterministic matching rule (identifier/reference resolution against the diff and its transitive references), and ACs matching no symbol under that rule are reported as unbound findings (`axiom: 2`, `tier: deterministic`).
+
+**Given** no usable SDD exists,
+**When** a review runs,
+**Then** Axiom #2 declares its degradation tier in the manifest and report — full / partial / none — with no silent skip, ever (FR-13).
+
+**Given** identical inputs,
+**When** binding re-runs,
+**Then** results are byte-identical.
+
+### Story 2.6: Axiom #2 — Logic and Test-Coverage Audit (LLM)
+
+As an author who validated a spec this morning,
+I want the implementation's logic and its tests audited against my ACs,
+So that "runs but doesn't do what I asked" is caught before the PR (FR-12 part 2, FR-19, UJ-1 step 5).
+
+**Acceptance Criteria:**
+
+**Given** bound ACs and the diff,
+**When** the axiom-2 handshake skill runs (loaded via local plugin install),
+**Then** it audits implementation logic against each AC and whether tests actually cover the stated requirements, emitting `tier: inferred` findings with `source: llm`, confidence, and the AC reference.
+
+**Given** deterministic binding found unbound ACs,
+**When** the LLM audit runs,
+**Then** LLM findings never replace the deterministic signal — both survive to dedup (the LLM is never the sole line of defense, FR-19).
+
+**Given** the transport degrades,
+**When** the run completes,
+**Then** the deterministic binding results still report, the manifest shows the audit's typed degradation, and headless contexts report the tier per FR-13.
+
+## Epic 3: LLM-Deepened Review with Governed Cost (M3, part 1)
+
+LLM enrichment beyond AST/regex with predictable, user-governed spend; generalizes Epic 2's IDE-only transport into the full two-transport layer. Gated by SPIKE-1's M3-entry confirmation. Depends on Epics 1–2.
+
+### Story 3.1: SPIKE-1 — M3-Entry Confirmation (gate)
+
+As a maintainer about to scale the LLM tier,
+I want the structured-output measurement re-run against the real axiom skills,
+So that the ≥98% bar is confirmed on production skills, not the throwaway harness.
+
+**Acceptance Criteria:**
+
+**Given** the production axiom skills existing at M3 entry (at minimum Epic 2's axiom-2 handshake skill) and the envelope as shipped,
+**When** ~50 real invocations run with the repair/retry contract,
+**Then** the post-repair envelope-valid rate is measured and reported against the ≥98% bar; skills added later in Epic 3 (3.4+) are measured against the same bar before they ship.
+
+**Given** the bar is missed,
+**When** the spike concludes,
+**Then** the envelope/prompt is simplified before any enrichment agent (3.4+) is built — fails closed.
+
+### Story 3.2: Provider-Agnostic Direct Transport
+
+As a CI pipeline or Ollama user,
+I want LLM reasoning through a direct adapter behind the same envelope,
+So that provider choice never touches agent behavior (FR-36).
+
+**Acceptance Criteria:**
+
+**Given** a configured provider (Anthropic API or Ollama),
+**When** an agent runs headlessly,
+**Then** core calls the `llm` package's direct adapter, the response is validated against the identical envelope, and `modelIdentity.source: api-verified` is recorded in the manifest.
+
+**Given** the provider is switched in config,
+**When** the same review runs,
+**Then** no agent code changes — only the adapter binding.
+
+**Given** CI mode,
+**When** an LLM response fails validation,
+**Then** the retry policy is fail-fast (config-raisable to the hard cap of 2 retries + 1 repair), terminating in a typed `degraded`,
+**And** the API key is read from env only, never persisted or logged, redacted in manifests.
+
+### Story 3.3: LLM Cost Governance and Input-Hash Cache
+
+As a team paying for tokens,
+I want per-agent controls and hard caching,
+So that spend is predictable, governed, and near-zero on unchanged inputs (FR-33, FR-35, NFR-5).
+
+**Acceptance Criteria:**
+
+**Given** per-agent config (enable/disable, model tier),
+**When** a review runs,
+**Then** disabled agents are skipped-and-declared, and each agent uses its configured tier.
+
+**Given** unchanged inputs for an agent,
+**When** a review re-runs,
+**Then** the LLM-tier cache (key includes model identity + prompt/template version) serves the verdict with zero API calls; a model-identity mismatch is a miss that re-stores under the reported identity.
+
+**Given** a completed run,
+**When** the report renders,
+**Then** it surfaces what the run actually cost (tokens/calls per agent) — spend is never a surprise,
+**And** deterministic-only mode remains a first-class zero-cost path (FR-34 preserved).
+
+### Story 3.4: Axiom #3 — Cleanliness Enrichment Agent
+
+As a developer,
+I want contextual cleanliness reasoning beyond what AST rules see,
+So that semantic duplication and intent-level mess surface with provenance (FR-19).
+
+**Acceptance Criteria:**
+
+**Given** a diff with semantic issues invisible to the AST tier (logic duplication with different shapes, misleading naming vs behavior),
+**When** the agent runs on either transport,
+**Then** findings carry `axiom: 3`, `tier: inferred`, `source: llm`, confidence — advisory by default in CI.
+
+**Given** the deterministic #3 analyzer found an overlapping issue,
+**When** the reduce step runs,
+**Then** cross-tier dedup merges per FR-21, validated against the overlap-labeled fixtures.
+
+**Given** the agent fails or is disabled,
+**When** the run completes,
+**Then** deterministic #3 results are unaffected (per-axiom isolation; LLM never the sole line of defense).
+
+### Story 3.5: Axiom #5 — Security Enrichment Agent
+
+As a developer,
+I want contextual security reasoning layered on the deterministic gate,
+So that taint-flow and logic-level vulnerabilities surface without weakening the blocking baseline (FR-19).
+
+**Acceptance Criteria:**
+
+**Given** a diff with context-dependent vulnerabilities (tainted input reaching a sink across functions, authz bypass logic),
+**When** the agent runs,
+**Then** findings carry `axiom: 5`, `tier: inferred`, `source: llm`, confidence.
+
+**Given** default CI gating,
+**When** inferred #5 findings exist,
+**Then** they advise (annotations) while deterministic #5 findings still block — the deterministic gate never depends on the LLM tier.
+
+**Given** overlap with deterministic findings,
+**When** dedup runs,
+**Then** the merged finding keeps the strongest severity and both descriptions.
+
+### Story 3.6: Two-Transport Parity Fixture
+
+As a maintainer promising accountable verdicts,
+I want recorded golden envelopes replayed through both transports in CI,
+So that IDE and headless runtimes provably share validation, aggregation, and manifest paths.
+
+**Acceptance Criteria:**
+
+**Given** recorded golden `.out` envelopes,
+**When** the CI parity fixture replays them through the file-handshake path and the direct-adapter path,
+**Then** validation, aggregation, and manifest outputs are equivalent — deterministically, so the gate can neither flake nor be skipped.
+
+**Given** the deterministic tier,
+**When** parity is checked,
+**Then** verdicts are byte-identical (extends the 1.18 determinism check across both runtimes).
+
+**Given** live LLM verdict-class comparison,
+**When** scheduled,
+**Then** it runs as a periodic advisory probe, never a blocking check.
+
+### Story 3.7: SPIKE-2 — Cost and Latency per Phase (gate-tier)
+
+As a maintainer claiming a 5-minute full review,
+I want measured wall-clock and token spend per phase on a worst-case PR,
+So that NFR-2 is evidence, not hope.
+
+**Acceptance Criteria:**
+
+**Given** a realistic worst-case PR-sized diff,
+**When** a full review (deterministic + enrichment) runs,
+**Then** per-phase wall-clock and token spend are recorded and reported against the 5-minute target and 10-minute ceiling.
+
+**Given** the ceiling is threatened,
+**When** budgets are tuned,
+**Then** per-phase budgets are set from the measured numbers, and the 10-minute ceiling degrades to partials — it is never the failure.
+
+## Epic 4: Institutional Memory — Corpus, Conventions & Trends (M3, part 2)
+
+The knowledge substrate goes fully live: Cartographer, Miner, curation, decay, freshness, exemplars, and the longitudinal story (UJ-3). ODs 2/3/4 resolved 2026-07-03. Depends on Epics 1–3.
+
+### Story 4.1: Conventions Ledger — Schema and Lifecycle
+
+As a team owning its conventions,
+I want the full Ledger schema with lifecycle states and governance fields,
+So that conventions are explicit, versioned artifacts humans control (FR-2).
+
+**Acceptance Criteria:**
+
+**Given** a ledger entry,
+**When** validated,
+**Then** it carries detection method, prevalence evidence, intent evidence, lifecycle status (`proposed | confirmed | waning | superseded | rejected`), the precedence-over-cleanliness flag, and (for rejected entries) damping metadata (`rejectionCount`, timestamps).
+
+**Given** `conventions.yaml` is read,
+**When** parsed,
+**Then** Zod-on-read guards YAML coercion footguns per the documented quoting discipline, entries sort by stable id, and a torn or invalid file produces the documented degraded path (human-review prompt), never silent regeneration.
+
+**Given** any write by the tool,
+**When** it lands,
+**Then** human-owned entries are never silently regenerated — tool writes touch only tool-owned fields.
+
+### Story 4.2: Cartographer — Full Corpus Map Lifecycle
+
+As a developer on a moving codebase,
+I want the Corpus Map maintained incrementally with optional LLM enrichment,
+So that "what exists, where, why" stays current at activity-scaled cost (FR-1).
+
+**Acceptance Criteria:**
+
+**Given** code changes since the last map build,
+**When** the out-of-band warm refresh runs (review start or manual `guardrails map`),
+**Then** only changed files re-map (hash-gated), affected Ledger entries re-evaluate only if their evidence set intersects changed entities, and the review itself never blocks — it uses last-known-good and reports the Map version/age used.
+
+**Given** the deterministic structural map,
+**When** the LLM inference half runs (via the envelope, one-way),
+**Then** purpose/zone-role/exemplar-designation proposals are produced for human confirmation; confirmed annotations land in committed `corpus-map.yaml`, regenerable structure stays in `.cache/`.
+
+**Given** the LLM half is disabled or degrades,
+**When** the map is consumed,
+**Then** the deterministic map remains complete and useful on its own.
+
+### Story 4.3: Convention Miner
+
+As a maintainer,
+I want candidate conventions mined from Map evidence with prevalence and intent scoring,
+So that the ledger fills itself with proposals I only have to judge (FR-4, OD-2).
+
+**Acceptance Criteria:**
+
+**Given** Map evidence,
+**When** the Miner runs (out-of-band, never in the review path),
+**Then** candidates enter the gitignored `.cache/proposed/` lane as `status: proposed`, each scored on prevalence and intent — never the committed ledger, never review findings.
+
+**Given** a previously rejected identical convention,
+**When** mining re-runs,
+**Then** it is never re-proposed.
+
+**Given** a *similar* candidate in a pattern family with prior rejections,
+**When** scored,
+**Then** its required prevalence threshold is `base × 2^rejectionCount` (capped) per OD-2.
+
+### Story 4.4: Build Strategies — Hot-Seed Completion of `init`
+
+As a user on a 10,000-file brownfield repo,
+I want `init`'s `eager | lazy | hot-seed` mining strategies live,
+So that day-one corpus value arrives at bounded cost that scales with activity, not size (FR-3 completion, NFR-6/13).
+
+**Acceptance Criteria:**
+
+**Given** `hot-seed` (the default),
+**When** `init` seeding runs,
+**Then** the highest-churn zones (from git history) are mined first within a config-declared cost bound (default: top 10 churn zones, config-overridable), the actual cost is reported against that bound, and the strategy choice appears in the questionnaire (the Epic 1 placeholder activates).
+
+**Given** `eager` or `lazy`,
+**When** selected,
+**Then** eager mines all zones up front; lazy defers mining to first touch — each documented with its cost profile.
+
+**Given** a 10k-file repo,
+**When** hot-seed runs,
+**Then** init-time cost scales with selected zones/activity, not raw file count (NFR-6 evidence recorded).
+
+### Story 4.5: Evidence Trail
+
+As a curator judging a proposal,
+I want ledger entries linked to human-authored evidence,
+So that confirmation decisions rest on recorded intent, not vibes (FR-8).
+
+**Acceptance Criteria:**
+
+**Given** a ledger entry,
+**When** evidence is attached,
+**Then** it links human-authored sources (ADRs, human PR comments, elicitation answers) stored under committed `_agentic-guardrails/evidence/` (evidence backs human decisions per the version-decisions rule; layout addition backported to the architecture's artifact layout at this story),
+**And** bot/agent-generated content is excluded as evidence by rule.
+
+**Given** an entry with evidence,
+**When** displayed in the digest,
+**Then** each source is shown with provenance (what, where, when).
+
+### Story 4.6: Curation Digest
+
+As a maintainer on my own schedule,
+I want a batched digest to accept or reject proposals,
+So that curation is one decision on something already surfaced — never per-review noise (FR-5, FR-26 partial, OD-3/OD-4, UJ-3).
+
+**Acceptance Criteria:**
+
+**Given** proposals in the `.cache/proposed/` lane,
+**When** `guardrails curate` runs,
+**Then** each is presented with its evidence; **accept** moves it to committed `conventions.yaml` as `confirmed` (the act that grants enforcement); **reject** writes it to the committed ledger as `rejected` with damping metadata — both as ordinary reviewable file edits.
+
+**Given** contradictory human evidence on an entry,
+**When** presented,
+**Then** both sources appear side by side, the human's resolution is recorded on the entry with a rationale field, and that decision wins thereafter (OD-3).
+
+**Given** ≥10 pending proposals or ≥30 days since last curation (config-overridable),
+**When** a review summary renders,
+**Then** exactly one quiet line notes the queue — never findings-level noise (OD-4),
+**And** unconfirmed proposals never appear in review findings.
+
+### Story 4.7: Asymmetric Trust Decay
+
+As a team mid-migration,
+I want enforcement revoked automatically as evidence erodes,
+So that dead patterns stop being enforced without anyone having to notice first (FR-6).
+
+**Acceptance Criteria:**
+
+**Given** a confirmed convention whose incidence in the codebase declines past the config-defined decay threshold (default: incidence below 50% of the incidence recorded at confirmation, config-overridable),
+**When** re-evaluation runs (out-of-band),
+**Then** the entry transitions to `waning` and stops carrying enforcement, with the transition surfaced (not silent).
+
+**Given** a convention superseded by a newer confirmed one,
+**When** detected,
+**Then** it is marked `superseded` and un-enforced,
+**And** promotion back to `confirmed` requires human action — trust is human-granted, machine-revoked, never machine-granted.
+
+### Story 4.8: Freshness Watermark and Staleness Ceiling
+
+As a reviewer trusting corpus-dependent findings,
+I want staleness detected before every review with a hard ceiling,
+So that conformance never silently judges against a stale world (FR-7).
+
+**Acceptance Criteria:**
+
+**Given** Map and Ledger watermarks,
+**When** a review starts,
+**Then** staleness detection adds at most 5 seconds to review start (NFR-3, same bound as 1.8's preflight); interactive mode prompts to refresh, CI follows `defer | update | update_after:X`.
+
+**Given** staleness beyond the hard ceiling (default ~14 days, config-overridable),
+**When** the review runs,
+**Then** corpus-dependent signals (#6 conformance, and any finding's `corpus://` exemplar citation) degrade to `inconclusive` (`reason: stale_corpus`) while corpus-independent axioms run normally — the ceiling forces a surfaced choice, never a blocking refresh, never silent staleness.
+
+### Story 4.9: Axiom #6 — Conformance Enrichment and Living Exemplars
+
+As a developer receiving a conformance finding,
+I want the finding to cite a living exemplar from my own codebase,
+So that the fix is a pointer, not a lecture (FR-19 #6 activation, FR-22, UJ-2 step 2).
+
+**Acceptance Criteria:**
+
+**Given** confirmed conventions and the Corpus Map,
+**When** the #6 enrichment agent runs,
+**Then** judgment-tier conformance findings carry `tier: inferred`, cite the violated convention, and include a `corpus://<entity>` exemplar resolving to a real, current entity.
+
+**Given** only unconfirmed (`proposed`) conventions exist,
+**When** the agent runs,
+**Then** zero conformance findings from them — enforcement requires `confirmed` (human-confirm invariant).
+
+**Given** the corpus is stale past the ceiling or the exemplar entity no longer exists,
+**When** findings compose,
+**Then** the axiom degrades to `inconclusive` / the citation is dropped with a typed reason — never a dangling pointer.
+
+### Story 4.10: Longitudinal Reports and Ledger Health
+
+As a maintainer telling the repo's quality story,
+I want cross-signal reports over time and a semantic ledger-health view,
+So that trajectory is visible and stale governance is loud (FR-16, FR-17).
+
+**Acceptance Criteria:**
+
+**Given** accumulated trend history,
+**When** a longitudinal report is requested,
+**Then** it correlates quality movements across axioms and time (e.g., "DRY violations up 40% over three sprints while SDD coverage dropped"), computed from committed `trends.jsonl` — validated-before-trust,
+**And** a golden-fixture history with known movements reproduces the expected correlation statements exactly (the report's oracle).
+
+**Given** the ledger,
+**When** the health view renders,
+**Then** staleness is expressed in human terms ("3 conventions waning, incidence −40%"), not commit counts,
+**And** the trends HTML view gains the report's series without violating the no-CDN/no-network constraint.
+
+## Epic 5: Ship It — Plugin, CI Gate & Write-Time Guardrails (M4 → v1)
+
+The three distribution surfaces plus write-time enforcement (UJ-2 in full). Depends on Epics 1–4.
+
+### Story 5.1: Write-Time Standards Skill
+
+As an agent author writing code in a consuming repo,
+I want axiom-aligned engineering standards injected at write time,
+So that code is steered toward what the reviewer will check — same vocabulary, fewer findings (FR-37, FR-38).
+
+**Acceptance Criteria:**
+
+**Given** the skill's rule set,
+**When** compared against the six axioms,
+**Then** every rule maps to an axiom's vocabulary (structural, AC-fidelity, cleanliness, NFR, security, conformance), and remains a project-generic baseline — derived from no single repo's artifacts.
+
+**Given** the skill description,
+**When** matched against tasks,
+**Then** it activates on backend/frontend code-writing tasks only — precision as a security boundary; it does not trigger on docs or unrelated work.
+
+**Given** the legacy `engineering-standards` skill,
+**When** diffed,
+**Then** a rule-to-axiom mapping table exists in the skill's docs in which every legacy rule is mapped to an axiom, replaced, or explicitly dropped with rationale — no legacy rule left unaccounted (the FR-38 named axis, verifiable by inspection).
+
+### Story 5.2: Command Surface
+
+As a plugin user,
+I want the full slash-command surface,
+So that every scope and single-axiom run is one command away (FR-28).
+
+**Acceptance Criteria:**
+
+**Given** the plugin,
+**When** installed,
+**Then** `/review-local`, `/review-branch [branch?]`, `/review-pr [pr?]`, `/review-project`, and `/axiom <N> [--scope]` exist as thin wrappers over the CLI/engine — no analysis logic in the surface.
+
+**Given** `/axiom <N>`,
+**When** invoked,
+**Then** a single-axiom run executes (the CLI gains its single-axiom counterpart in this story),
+**And** each command's frontmatter declares only the tools it needs.
+
+### Story 5.3: Plugin Packaging and Coaching Integration
+
+As a Claude Code user,
+I want one installable plugin with all coaching loops integrated,
+So that interactive mode is a product, not a pile of dogfooding files (FR-26 primary).
+
+**Acceptance Criteria:**
+
+**Given** the plugin package,
+**When** installed via the plugin store or git,
+**Then** SDD elicitation, AC remediation, the curation digest entry point, and staleness prompts all work through it — the Epics 2/4 skills packaged, versioned, and described precisely.
+
+**Given** a fresh user,
+**When** they run `/review-local` for the first time,
+**Then** missing setup (`init` not run) is detected and guided, not crashed on.
+
+**Given** the plugin's skills,
+**When** reviewed,
+**Then** each skill's description is scoped to its exact trigger (description precision as a security boundary).
+
+### Story 5.4: GitHub Action — Headless CI Mode
+
+As a team gating merges,
+I want the same pipeline as a GitHub Action with zero interactive pauses,
+So that CI enforcement is the identical engine, accountably (FR-27).
+
+**Acceptance Criteria:**
+
+**Given** the Action on a PR,
+**When** it runs on a standard GitHub-hosted runner,
+**Then** the same pipeline executes with no extra infrastructure; anything that would pause resolves by configured policy and is reported as a gap.
+
+**Given** artifacts and tracked-state writes,
+**When** the run ends,
+**Then** the Action follows configured policy — commit with `[skip ci]` or publish as workflow artifact without committing.
+
+**Given** the run manifest,
+**When** compared with an interactive run's manifest on the same input,
+**Then** both carry the same envelope schema version and the comparison passes 3.6's equivalence rules (deterministic tier byte-identical; LLM tier verdict-class equivalent).
+
+### Story 5.5: Per-Axiom Status Checks and the Single PR Comment
+
+As a reviewer scanning a PR,
+I want one structured comment and per-axiom checks,
+So that CI review output is glanceable and never accumulates (FR-29, FR-33 completion).
+
+**Acceptance Criteria:**
+
+**Given** a completed CI run,
+**When** results publish,
+**Then** each axiom gets a status check — blocking axioms as required checks, advisory as informational — and one structured PR comment is created or **replaces its predecessor**, never stacking.
+
+**Given** per-agent trigger events in config,
+**When** CI events fire,
+**Then** agents run only on their configured triggers (the FR-33 CI dimension, wired now that CI exists).
+
+**Given** a degraded axiom,
+**When** checks publish,
+**Then** its check shows the tier and skip reason — absence-as-reported (NFR-8) extends to the checks surface.
+
+### Story 5.6: Quality Dashboard View
+
+As a developer reading any surface,
+I want a per-axiom, per-run quality summary,
+So that violations, severity, and trajectory are visible without opening the full artifact (FR-30).
+
+**Acceptance Criteria:**
+
+**Given** a completed run,
+**When** the CLI summary and PR comment render,
+**Then** each axiom shows violations, severity breakdown, trend delta (from 1.16's aggregator), and a link/path to the full artifact — per-run and distinct from the longitudinal `trends.html`.
+
+**Given** a deterministic-only run,
+**When** the dashboard renders,
+**Then** LLM-tier rows show as declared-absent, not missing.
+
+### Story 5.7: Distribution and Launch Readiness
+
+As the maintainer launching v1,
+I want packages published, surfaces listed, and first-run value verified,
+So that adoption is durable and the M4 gate is measurable (go-to-market G2).
+
+**Acceptance Criteria:**
+
+**Given** the release,
+**When** published,
+**Then** `@agentic-guardrails/{contracts,core,llm,cli}` are on npm via Changesets, the Action is on the GitHub Marketplace, and the plugin is submitted to the Claude Code Plugin Store and awesome-claude-code,
+**And** README, per-feature docs, and ADRs are current in the same release (Definition of Done).
+
+**Given** a fresh external repo,
+**When** `init` + first review run,
+**Then** at least one finding the author judges worth acting on appears within 15 minutes of installation *(gate-tier: human judgment on a real external repo before launch — the counter-metric's mechanical half, wall-clock ≤15 min from install to first rendered finding, is engineering-verifiable)*.
+
+**Given** launch claims,
+**When** asserted,
+**Then** every claim traces to a passed gate or spike (no unvalidated noise/performance claims — SPIKE-4 discipline).
