@@ -1,0 +1,112 @@
+# generated: 2026-07-04
+# last_updated: 2026-07-04
+# project: agentic-guardrails
+# project_key: NOKEY
+# tracking_system: file-system
+# story_location: {project-root}/_bmad-output/implementation-artifacts
+
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:
+#   - backlog: Epic not yet started
+#   - in-progress: Epic actively being worked on
+#   - done: All stories in epic completed
+#
+# Epic Status Transitions:
+#   - backlog → in-progress: Automatically when first story is created (via create-story)
+#   - in-progress → done: Manually when all stories reach 'done' status
+#
+# Story Status:
+#   - backlog: Story only exists in epic file
+#   - ready-for-dev: Story file created in stories folder
+#   - in-progress: Developer actively working on implementation
+#   - review: Ready for code review (via Dev's code-review workflow)
+#   - done: Story completed
+#
+# Retrospective Status:
+#   - optional: Can be completed but not required
+#   - done: Retrospective has been completed
+#
+# WORKFLOW NOTES:
+# ===============
+# - Epic transitions to 'in-progress' automatically when first story is created
+# - Stories can be worked in parallel if team capacity allows
+# - Developer typically creates next story after previous one is 'done' to incorporate learnings
+# - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
+
+generated: 2026-07-04
+last_updated: 2026-07-04
+project: agentic-guardrails
+project_key: NOKEY
+tracking_system: file-system
+story_location: "{project-root}/_bmad-output/implementation-artifacts"
+
+development_status:
+  # Epic 1: Zero-Cost Deterministic Review (M0 + M1)
+  epic-1: backlog
+  1-1-monorepo-scaffold-with-guarded-boundaries: backlog
+  1-2-canonical-contracts-package: backlog
+  1-3-typescript-languageadapter-and-import-graph: backlog
+  1-4-walking-skeleton-first-end-to-end-review: backlog
+  1-5-spike-3-import-graph-cost-at-scale-gate: backlog
+  1-6-config-plane: backlog
+  1-7-pipeline-hardening-and-deterministic-cache: backlog
+  1-8-init-and-the-structural-corpus-seed: backlog
+  1-9-axiom-1-structural-analyzer-full-rule-set: backlog
+  1-10-axiom-3-cleanliness-analyzer-ast-tier: backlog
+  1-11-axiom-4-nfr-analyzer-structural-tier: backlog
+  1-12-axiom-5-security-analyzer-regex-ast-tier: backlog
+  1-13-axiom-6-conformance-analyzer-structural-tier: backlog
+  1-14-spike-5-windows-git-worktree-lifecycle-gate: backlog
+  1-15-review-scopes-branch-pr-and-project: backlog
+  1-16-scores-trends-and-dispositions: backlog
+  1-17-spike-4-noise-metric-and-labeled-fixtures-gate: backlog
+  1-18-dogfood-ci-workflow: backlog
+  1-19-spike-1-structured-output-prototype-m1-signal: backlog
+  epic-1-retrospective: optional
+
+  # Epic 2: The Spec Gate — AC Validation & Verification (M2)
+  epic-2: backlog
+  2-1-sdd-contract-and-validatedsdd: backlog
+  2-2-standalone-spec-gate-deterministic: backlog
+  2-3-interactive-file-handshake-transport: backlog
+  2-4-ac-elicitation-coach: backlog
+  2-5-axiom-2-ac-to-symbol-binding-deterministic: backlog
+  2-6-axiom-2-logic-and-test-coverage-audit-llm: backlog
+  epic-2-retrospective: optional
+
+  # Epic 3: LLM-Deepened Review with Governed Cost (M3, part 1)
+  epic-3: backlog
+  3-1-spike-1-m3-entry-confirmation-gate: backlog
+  3-2-provider-agnostic-direct-transport: backlog
+  3-3-llm-cost-governance-and-input-hash-cache: backlog
+  3-4-axiom-3-cleanliness-enrichment-agent: backlog
+  3-5-axiom-5-security-enrichment-agent: backlog
+  3-6-two-transport-parity-fixture: backlog
+  3-7-spike-2-cost-and-latency-per-phase-gate-tier: backlog
+  epic-3-retrospective: optional
+
+  # Epic 4: Institutional Memory — Corpus, Conventions & Trends (M3, part 2)
+  epic-4: backlog
+  4-1-conventions-ledger-schema-and-lifecycle: backlog
+  4-2-cartographer-full-corpus-map-lifecycle: backlog
+  4-3-convention-miner: backlog
+  4-4-build-strategies-hot-seed-completion-of-init: backlog
+  4-5-evidence-trail: backlog
+  4-6-curation-digest: backlog
+  4-7-asymmetric-trust-decay: backlog
+  4-8-freshness-watermark-and-staleness-ceiling: backlog
+  4-9-axiom-6-conformance-enrichment-and-living-exemplars: backlog
+  4-10-longitudinal-reports-and-ledger-health: backlog
+  epic-4-retrospective: optional
+
+  # Epic 5: Ship It — Plugin, CI Gate & Write-Time Guardrails (M4 → v1)
+  epic-5: backlog
+  5-1-write-time-standards-skill: backlog
+  5-2-command-surface: backlog
+  5-3-plugin-packaging-and-coaching-integration: backlog
+  5-4-github-action-headless-ci-mode: backlog
+  5-5-per-axiom-status-checks-and-the-single-pr-comment: backlog
+  5-6-quality-dashboard-view: backlog
+  5-7-distribution-and-launch-readiness: backlog
+  epic-5-retrospective: optional
