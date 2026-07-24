@@ -1,10 +1,18 @@
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { InvalidScopeError, writeReviewArtifact } from "./artifact-writer.js";
+import { InvalidScopeError, writeFileAtomic, writeReviewArtifact } from "./artifact-writer.js";
 
 const tempDirs: string[] = [];
 
@@ -81,9 +89,29 @@ describe("writeReviewArtifact", () => {
     expect(content).toContain(".cache/");
     expect(content).toContain("config.schema.json");
 
-    // An existing .gitignore is user territory — never clobbered.
-    writeFileSync(gitignorePath, "# custom\n");
+    // An existing .gitignore is user territory — user content is preserved,
+    // but MISSING seeded lines are appended (a stale pre-1.7 file must not
+    // leave .cache/ committable).
+    writeFileSync(gitignorePath, "# custom\nreviews/\n");
     writeReviewArtifact({ repoRoot: root, scope: "uncommitted", runId: "r2", json: "{}\n" });
-    expect(readFileSync(gitignorePath, "utf8")).toBe("# custom\n");
+    expect(readFileSync(gitignorePath, "utf8")).toBe(
+      "# custom\nreviews/\n.cache/\nconfig.schema.json\n",
+    );
+
+    // A complete file is left byte-identical.
+    const complete = readFileSync(gitignorePath, "utf8");
+    writeReviewArtifact({ repoRoot: root, scope: "uncommitted", runId: "r3", json: "{}\n" });
+    expect(readFileSync(gitignorePath, "utf8")).toBe(complete);
+  });
+});
+
+describe("writeFileAtomic", () => {
+  it("cleans up its temp file when the rename fails, and rethrows", () => {
+    const root = tempDir();
+    // The final path is an existing non-empty DIRECTORY: rename must fail.
+    const finalPath = path.join(root, "target");
+    mkdirSync(path.join(finalPath, "occupied"), { recursive: true });
+    expect(() => writeFileAtomic(finalPath, "content\n")).toThrow();
+    expect(readdirSync(root).filter((f) => f.endsWith(".tmp"))).toEqual([]);
   });
 });

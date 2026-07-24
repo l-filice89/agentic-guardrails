@@ -7,7 +7,7 @@
  */
 import path from "node:path";
 
-import type { Finding } from "@agentic-guardrails/contracts";
+import type { Degradation, Finding } from "@agentic-guardrails/contracts";
 import {
   runReview,
   writeReviewArtifact,
@@ -49,6 +49,12 @@ export async function reviewCommand(cwd: string): Promise<number> {
         `guardrails review: config: config.yaml is ${configGitStatus} — an uncommitted config governs gating\n`,
       );
     }
+    // Zero silent cache behavior: a disabled cache is declared in the
+    // manifest AND warned about here — never a quiet slow run.
+    const cacheDisabled = result.artifact.manifest.cache?.disabled;
+    if (cacheDisabled !== undefined) {
+      process.stderr.write(`guardrails review: cache disabled: ${cacheDisabled}\n`);
+    }
 
     const artifactPath = writeReviewArtifact({
       repoRoot: result.repoRoot,
@@ -59,7 +65,7 @@ export async function reviewCommand(cwd: string): Promise<number> {
     const relativePath = path
       .relative(result.repoRoot, artifactPath)
       .replaceAll("\\", "/");
-    process.stdout.write(formatSummary(result.artifact, relativePath, result.runDegraded.length));
+    process.stdout.write(formatSummary(result.artifact, relativePath, result.runDegraded));
 
     if (result.degradedRun) {
       // Zero-SILENT-degradation: every reason is printed, one line each.
@@ -82,9 +88,15 @@ export async function reviewCommand(cwd: string): Promise<number> {
 export function formatSummary(
   artifact: ReviewArtifact,
   artifactRelativePath: string,
-  runDegradedCount: number,
+  runDegraded: readonly Degradation[],
 ): string {
   const lines = [`guardrails review (${artifact.scope})`];
+
+  // NFR-8: degraded work is IN the report header, above the findings block
+  // — a failed axiom (or any lost coverage) can never hide below the fold.
+  for (const d of runDegraded) {
+    lines.push(`degraded: ${d.subject} — ${d.reason}`);
+  }
 
   const byAxiom = new Map<string, Finding[]>();
   for (const finding of artifact.findings) {
@@ -97,7 +109,9 @@ export function formatSummary(
     const category = AXIOM_CATEGORY[axiom] ?? "uncategorized";
     lines.push(`axiom ${axiom} · ${category}   ${severityCounts(group)}`);
     for (const f of group) {
-      lines.push(`  ${f.location.file}:${f.location.startLine}  ${f.severity}  ${f.message}  [${f.ruleId}]`);
+      lines.push(
+        `  ${f.location.file}:${f.location.startLine}  ${f.severity}  ${sanitizeMessage(f.message)}  [${f.ruleId}]`,
+      );
     }
   }
 
@@ -105,9 +119,19 @@ export function formatSummary(
   lines.push(
     `${artifact.findings.length} finding${artifact.findings.length === 1 ? "" : "s"} ` +
       `(${severityCounts(artifact.findings)}) · deterministic tier · ` +
-      `${runDegradedCount} degraded`,
+      `${runDegraded.length} degraded`,
   );
   return `${lines.join("\n")}\n`;
+}
+
+/** Finding messages can embed analyzed-file content — C0 control characters
+ * (except \n and \t) are stripped so a message can never smuggle terminal
+ * escape sequences into the report. Code-point filter, not a regex literal,
+ * so no control character ever appears in this source file. */
+function sanitizeMessage(message: string): string {
+  return [...message]
+    .filter((c) => c === "\n" || c === "\t" || c.charCodeAt(0) >= 0x20)
+    .join("");
 }
 
 function severityCounts(findings: readonly Finding[]): string {

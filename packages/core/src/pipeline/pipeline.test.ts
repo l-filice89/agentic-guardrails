@@ -1,12 +1,26 @@
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
 import { computeFindingId, type Finding } from "@agentic-guardrails/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { runReview, type Analyzer } from "./pipeline.js";
+import { normalizeCacheTruth } from "./normalize-cache-truth.js";
+import {
+  computeGraphKey,
+  DuplicateAnalyzerError,
+  runReview,
+  type Analyzer,
+} from "./pipeline.js";
 
 const tempDirs: string[] = [];
 
@@ -58,6 +72,10 @@ const okAnalyzer: Analyzer = {
 };
 const cleanAnalyzer: Analyzer = {
   axiom: "1",
+  run: async () => ({ findings: [], degraded: [] }),
+};
+const cleanAnalyzer2: Analyzer = {
+  axiom: "2",
   run: async () => ({ findings: [], degraded: [] }),
 };
 const crashingAnalyzer: Analyzer = {
@@ -293,13 +311,13 @@ describe("runReview config plane (1.6)", () => {
 });
 
 describe("runReview determinism (phases 4–5)", () => {
-  it("identical input produces byte-identical artifact JSON and the same runId", async () => {
+  it("identical input produces byte-identical artifact JSON (modulo manifest.cache) and the same runId", async () => {
     const cwd = tempRepoWithChange();
     const first = await runReview({ cwd, analyzers: [okAnalyzer] });
     const second = await runReview({ cwd, analyzers: [okAnalyzer] });
     expect(first.ok && second.ok).toBe(true);
     if (!first.ok || !second.ok) return;
-    expect(second.artifactJson).toBe(first.artifactJson);
+    expect(normalizeCacheTruth(second.artifactJson)).toBe(normalizeCacheTruth(first.artifactJson));
     expect(second.artifact.runId).toBe(first.artifact.runId);
     expect(first.artifact.runId).toMatch(/^[0-9a-f]{16}$/);
   });
@@ -325,5 +343,346 @@ describe("runReview determinism (phases 4–5)", () => {
     expect(first.ok && second.ok).toBe(true);
     if (!first.ok || !second.ok) return;
     expect(second.artifact.runId).not.toBe(first.artifact.runId);
+  });
+});
+
+function countingAnalyzer(axiom: string, findings: Finding[] = []): { analyzer: Analyzer; runs: () => number } {
+  let runs = 0;
+  return {
+    analyzer: {
+      axiom,
+      run: async () => {
+        runs += 1;
+        return { findings, degraded: [] };
+      },
+    },
+    runs: () => runs,
+  };
+}
+
+function findingsCacheDir(cwd: string): string {
+  return path.join(cwd, "_agentic-guardrails", ".cache", "findings");
+}
+
+describe("runReview deterministic cache (1.7)", () => {
+  it("a warm run skips analyzer execution, records hits in the manifest, and is byte-identical modulo manifest.cache", async () => {
+    const cwd = tempRepoWithChange();
+    const spy = countingAnalyzer("1", [fakeFinding("change.ts")]);
+    const cold = await runReview({ cwd, analyzers: [spy.analyzer] });
+    const warm = await runReview({ cwd, analyzers: [spy.analyzer] });
+    expect(cold.ok && warm.ok).toBe(true);
+    if (!cold.ok || !warm.ok) return;
+    expect(spy.runs()).toBe(1); // second run served entirely from cache
+    expect(cold.artifact.manifest.cache).toMatchObject({ hits: 0, invalid: 0 });
+    expect(cold.artifact.manifest.cache!.misses).toBeGreaterThan(0);
+    expect(warm.artifact.manifest.cache!.hits).toBeGreaterThan(0);
+    expect(warm.artifact.manifest.cache).toMatchObject({ misses: 0, invalid: 0 });
+    // The cache serves the identical data a cold run computes.
+    expect(warm.artifact.findings).toEqual(cold.artifact.findings);
+    expect(normalizeCacheTruth(warm.artifactJson)).toBe(normalizeCacheTruth(cold.artifactJson));
+  });
+
+  it("an input change misses (key changed) and recomputes", async () => {
+    const cwd = tempRepoWithChange();
+    const spy = countingAnalyzer("1");
+    await runReview({ cwd, analyzers: [spy.analyzer] });
+    writeFileSync(path.join(cwd, "change.ts"), "export const change = 2;\n");
+    const second = await runReview({ cwd, analyzers: [spy.analyzer] });
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(spy.runs()).toBe(2);
+    expect(second.artifact.manifest.cache!.hits).toBe(0);
+  });
+
+  it("HAZARD: a corrupt cache entry is a typed miss + degradation — recomputed and overwritten, never a crash", async () => {
+    const cwd = tempRepoWithChange();
+    const spy = countingAnalyzer("1", [fakeFinding("change.ts")]);
+    await runReview({ cwd, analyzers: [spy.analyzer] });
+    const entries = readdirSync(findingsCacheDir(cwd));
+    expect(entries).toHaveLength(1);
+    const entryPath = path.join(findingsCacheDir(cwd), entries[0]!);
+    writeFileSync(entryPath, "{ torn garbage");
+    const second = await runReview({ cwd, analyzers: [spy.analyzer] });
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(spy.runs()).toBe(2); // recomputed
+    expect(second.artifact.findings).toHaveLength(1); // still correct output
+    expect(second.artifact.manifest.cache).toMatchObject({ hits: 0, misses: 0, invalid: 1 });
+    expect(second.runDegraded).toContainEqual({
+      reason: "invalid cache entry (recomputed and overwritten)",
+      subject: "cache/findings/axiom-1",
+    });
+    // Entry overwritten with a valid one: a third run hits again.
+    expect(JSON.parse(readFileSync(entryPath, "utf8"))).toBeTruthy();
+    const third = await runReview({ cwd, analyzers: [spy.analyzer] });
+    expect(third.ok && spy.runs() === 2).toBe(true);
+  });
+
+  it("cache schema drift (valid JSON, contract-invalid findings) is a miss + degradation, never wrong data", async () => {
+    const cwd = tempRepoWithChange();
+    const spy = countingAnalyzer("1");
+    await runReview({ cwd, analyzers: [spy.analyzer] });
+    const entries = readdirSync(findingsCacheDir(cwd));
+    writeFileSync(
+      path.join(findingsCacheDir(cwd), entries[0]!),
+      '{"findings":[{"bogus":true}],"degraded":[]}\n',
+    );
+    const second = await runReview({ cwd, analyzers: [spy.analyzer] });
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(spy.runs()).toBe(2);
+    expect(second.artifact.manifest.cache!.invalid).toBe(1);
+    expect(second.degradedRun).toBe(true);
+  });
+
+  it("a degraded partial is never cached — it must not become a future 'clean' hit", async () => {
+    const cwd = tempRepoWithChange();
+    let runs = 0;
+    const degrading: Analyzer = {
+      axiom: "1",
+      run: async () => {
+        runs += 1;
+        return {
+          findings: [],
+          degraded: [{ reason: "coverage lost", subject: "axiom-1" }],
+        };
+      },
+    };
+    const first = await runReview({ cwd, analyzers: [degrading] });
+    const second = await runReview({ cwd, analyzers: [degrading] });
+    expect(first.ok && second.ok).toBe(true);
+    if (!first.ok || !second.ok) return;
+    expect(runs).toBe(2); // recomputed, not served from cache
+    expect(second.artifact.manifest.cache!.hits).toBe(0);
+    expect(second.degradedRun).toBe(true); // the degradation stayed visible
+  });
+
+  it("HAZARD: post-abort analyzer completions are never written to the cache", async () => {
+    const cwd = tempRepoWithChange();
+    const slow: Analyzer = {
+      axiom: "1",
+      run: () =>
+        new Promise((resolve) =>
+          setTimeout(() => resolve({ findings: [], degraded: [] }), 200),
+        ),
+    };
+    const result = await runReview({ cwd, analyzers: [slow], phase1BudgetMs: 50 });
+    expect(result.ok).toBe(true);
+    // Let the abandoned in-flight analyzer finish — its late completion must
+    // not leak an aborted run's result into future runs.
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    let entries: string[] = [];
+    try {
+      entries = readdirSync(findingsCacheDir(cwd));
+    } catch {
+      // cache dir never created for findings — equally clean
+    }
+    expect(entries).toEqual([]);
+  });
+
+  it("a crash is never cached — the analyzer re-runs until it succeeds", async () => {
+    const cwd = tempRepoWithChange();
+    let calls = 0;
+    const flaky: Analyzer = {
+      axiom: "1",
+      run: async () => {
+        calls += 1;
+        if (calls === 1) throw new Error("transient");
+        return { findings: [], degraded: [] };
+      },
+    };
+    const first = await runReview({ cwd, analyzers: [flaky] });
+    const second = await runReview({ cwd, analyzers: [flaky] });
+    expect(first.ok && second.ok).toBe(true);
+    if (!first.ok || !second.ok) return;
+    expect(calls).toBe(2);
+    expect(first.degradedRun).toBe(true);
+    expect(second.degradedRun).toBe(false);
+  });
+});
+
+describe("runReview phase budget (1.7)", () => {
+  it("a phase over budget degrades to partials with a typed reason — never an uncaught failure", async () => {
+    const cwd = tempRepoWithChange();
+    const slow: Analyzer = {
+      axiom: "9",
+      run: () =>
+        new Promise((resolve) => setTimeout(() => resolve({ findings: [], degraded: [] }), 400)),
+    };
+    const result = await runReview({ cwd, analyzers: [okAnalyzer, slow], phase1BudgetMs: 100 });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // The fast analyzer's work survived the abort.
+    expect(result.artifact.findings).toHaveLength(1);
+    expect(result.degradedRun).toBe(true);
+    expect(result.runDegraded).toContainEqual({
+      reason: "phase 1 exceeded its 100ms budget — analyzer aborted before completion",
+      subject: "axiom-9",
+    });
+    // P6: the manifest tells the truth about the aborted phase.
+    const phase1 = result.artifact.manifest.phases![1]!;
+    expect(phase1.ran).toBe(true); // one analyzer DID complete
+    expect(phase1.reason).toContain("aborted at the 100ms budget");
+    expect(phase1.reason).toContain("1/2 analyzers completed");
+  });
+
+  it("passes the phase-1 abort signal to analyzers via the context", async () => {
+    const cwd = tempRepoWithChange();
+    let seen: AbortSignal | undefined;
+    const spy: Analyzer = {
+      axiom: "1",
+      run: async (context) => {
+        seen = context.signal;
+        return { findings: [], degraded: [] };
+      },
+    };
+    const result = await runReview({ cwd, analyzers: [spy] });
+    expect(result.ok).toBe(true);
+    expect(seen).toBeInstanceOf(AbortSignal);
+  });
+});
+
+describe("runReview analyzer registration", () => {
+  it("rejects two analyzers registered for the same axiom with a typed error", async () => {
+    const cwd = tempRepoWithChange();
+    await expect(runReview({ cwd, analyzers: [okAnalyzer, cleanAnalyzer] })).rejects.toThrow(
+      DuplicateAnalyzerError,
+    );
+  });
+});
+
+describe("runReview declared cache-disable (P4: zero silent cache behavior)", () => {
+  it("declares caching disabled when the secret cannot be read or created", async () => {
+    const cwd = tempRepoWithChange();
+    // The secret path IS a directory: unreadable and uncreatable as a file.
+    const result = await runReview({ cwd, analyzers: [okAnalyzer], cacheSecretPath: cwd });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.artifact.manifest.cache).toEqual({
+      hits: 0,
+      misses: 0,
+      invalid: 0,
+      disabled:
+        "cache secret unavailable (could not read or create ~/.agentic-guardrails/cache-secret)",
+    });
+    expect(result.degradedRun).toBe(false); // disabled cache is declared, not degraded
+  });
+
+  it("declares caching disabled when the cache directory is unwritable", async () => {
+    const cwd = tempRepoWithChange();
+    // A FILE at the .cache path makes mkdir fail.
+    mkdirSync(path.join(cwd, "_agentic-guardrails"), { recursive: true });
+    writeFileSync(path.join(cwd, "_agentic-guardrails", ".cache"), "not a directory");
+    const result = await runReview({ cwd, analyzers: [okAnalyzer] });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.artifact.manifest.cache!.disabled).toContain("cache directory not writable");
+    expect(result.artifact.manifest.cache).toMatchObject({ hits: 0, misses: 0, invalid: 0 });
+  });
+
+  it("declares the empty-analyzable-set skip with a reason, never silently", async () => {
+    const dir = tempDir();
+    git(dir, ["init"]);
+    git(dir, ["config", "user.email", "test@example.com"]);
+    git(dir, ["config", "user.name", "Test"]);
+    writeFileSync(path.join(dir, "base.txt"), "base\n");
+    git(dir, ["add", "."]);
+    git(dir, ["commit", "-m", "base"]);
+    writeFileSync(path.join(dir, "notes.txt"), "no TS here\n"); // non-analyzable change
+    const result = await runReview({ cwd: dir, analyzers: [cleanAnalyzer] });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.artifact.manifest.cache!.disabled).toBe(
+      "no analyzable TypeScript changes — nothing to cache",
+    );
+  });
+
+  it("declares caching disabled (no fake key) when a participating file is unreadable", async () => {
+    const cwd = tempRepoWithChange();
+    // tsconfig `files` lists a file that does not exist on disk: the parsed
+    // file list still contains it, so its content hash is uncomputable.
+    writeFileSync(path.join(cwd, "tsconfig.json"), JSON.stringify({ files: ["ghost.ts"] }));
+    const result = await runReview({ cwd, analyzers: [okAnalyzer] });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.artifact.manifest.cache!.disabled).toContain(
+      "cache key not computable for tsconfig.json",
+    );
+    expect(result.artifact.manifest.cache).toMatchObject({ hits: 0, misses: 0, invalid: 0 });
+  });
+});
+
+describe("computeGraphKey toolchain invalidation (P5)", () => {
+  it("a different TypeScript version component changes the graph cache key", () => {
+    const cwd = tempRepoWithChange();
+    const tsconfigPath = path.join(cwd, "tsconfig.json");
+    const current = computeGraphKey(cwd, tsconfigPath);
+    const upgraded = computeGraphKey(cwd, tsconfigPath, "99.0.0");
+    expect(current).toBeDefined();
+    expect(upgraded).toBeDefined();
+    expect(upgraded).not.toBe(current);
+    // Same version → same key (the key stays content-addressed).
+    expect(computeGraphKey(cwd, tsconfigPath)).toBe(current);
+  });
+});
+
+describe("runReview assembly declaration (1.7)", () => {
+  it("declares the fixed six-phase shape with membership varying by config", async () => {
+    const cwd = tempRepoWithChange();
+    const result = await runReview({ cwd, analyzers: [okAnalyzer, cleanAnalyzer2] });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const phases = result.artifact.manifest.phases!;
+    expect(phases.map((p) => p.phase)).toEqual([0, 1, 2, 3, 4, 5]);
+    expect(phases[1]).toEqual({ phase: 1, members: ["axiom-1", "axiom-2"], ran: true });
+    // 2/3 are DECLARED with empty membership and a reason — never silent.
+    expect(phases[2]!.ran).toBe(false);
+    expect(phases[2]!.reason).toContain("Epic 2");
+    expect(phases[3]!.reason).toContain("Epic 3");
+    expect(phases[4]).toEqual({ phase: 4, members: ["merge", "sort"], ran: true });
+  });
+
+  it("an off-by-config axiom leaves phase-1 membership, keeping the six-phase shape fixed", async () => {
+    const cwd = tempRepoWithChange();
+    writeConfig(cwd, "axioms:\n  '1':\n    enforcement: 'off'\n");
+    const result = await runReview({ cwd, analyzers: [okAnalyzer, cleanAnalyzer2] });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const phases = result.artifact.manifest.phases!;
+    expect(phases).toHaveLength(6);
+    expect(phases[1]!.members).toEqual(["axiom-2"]);
+  });
+});
+
+describe("runReview merge step (phase 4, FR-21)", () => {
+  it("reduces overlapping same-file+axiom findings into one merged finding in the artifact", async () => {
+    const cwd = tempRepoWithChange();
+    const a: Finding = {
+      ...fakeFinding("change.ts"),
+      findingId: "aaaaaaaaaaaaaaaa",
+      location: { file: "change.ts", startLine: 10, endLine: 20 },
+      message: "first",
+      severity: "warning",
+    };
+    const b: Finding = {
+      ...fakeFinding("change.ts"),
+      findingId: "bbbbbbbbbbbbbbbb",
+      location: { file: "change.ts", startLine: 15, endLine: 25 },
+      message: "second",
+      severity: "error",
+      source: "regex",
+    };
+    const analyzer: Analyzer = { axiom: "1", run: async () => ({ findings: [b, a], degraded: [] }) };
+    const result = await runReview({ cwd, analyzers: [analyzer] });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.artifact.findings).toHaveLength(1);
+    expect(result.artifact.findings[0]).toMatchObject({
+      findingId: "aaaaaaaaaaaaaaaa",
+      severity: "error",
+      source: ["ast", "regex"],
+      message: "first | second",
+      location: { file: "change.ts", startLine: 10, endLine: 25 },
+    });
   });
 });

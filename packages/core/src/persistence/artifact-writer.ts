@@ -9,12 +9,14 @@
  */
 import { randomBytes } from "node:crypto";
 import {
+  appendFileSync,
   closeSync,
-  existsSync,
   fsyncSync,
   mkdirSync,
   openSync,
+  readFileSync,
   renameSync,
+  rmSync,
   writeFileSync,
   writeSync,
 } from "node:fs";
@@ -62,14 +64,20 @@ export function writeFileAtomic(finalPath: string, content: string): void {
   // interleave writes into the same temp file. Randomness lives in the TEMP
   // name only — the final path and file bytes stay deterministic.
   const tmpPath = `${finalPath}.${process.pid}.${randomBytes(2).toString("hex")}.tmp`;
-  const fd = openSync(tmpPath, "w");
   try {
-    writeSync(fd, content);
-    fsyncSync(fd);
-  } finally {
-    closeSync(fd);
+    const fd = openSync(tmpPath, "w");
+    try {
+      writeSync(fd, content);
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
+    renameSync(tmpPath, finalPath); // same-directory rename: atomic, overwrites
+  } catch (error) {
+    // A failed write/rename must not leave its temp file behind.
+    rmSync(tmpPath, { force: true });
+    throw error;
   }
-  renameSync(tmpPath, finalPath); // same-directory rename: atomic, overwrites
   // Best-effort directory fsync so the rename itself reaches disk. Windows
   // cannot open directories for fsync — visibility-atomicity holds anyway.
   try {
@@ -85,14 +93,29 @@ export function writeFileAtomic(finalPath: string, content: string): void {
   }
 }
 
+/** The generated layers the seeded output .gitignore must cover. */
+const SEEDED_IGNORE_LINES = ["reviews/", ".cache/", "config.schema.json"];
+
 /**
- * Ensures `_agentic-guardrails/.gitignore` exists, ignoring the generated
- * layers (`reviews/`, `.cache/`) while leaving the committed layer (Story
- * 1.8 config/ledger files) committable. An existing file is left untouched —
- * it is user-editable territory.
+ * Ensures `_agentic-guardrails/.gitignore` covers the generated layers
+ * (`reviews/`, `.cache/`, schema file) while leaving the committed layer
+ * (Story 1.8 config/ledger files) committable. An existing file is
+ * user-editable territory: any user content is preserved verbatim, but
+ * missing seeded lines are APPENDED — a pre-1.7 file must not silently
+ * leave `.cache/` committable.
  */
 function ensureOutputGitignore(outRoot: string): void {
   const gitignorePath = path.join(outRoot, ".gitignore");
-  if (existsSync(gitignorePath)) return;
-  writeFileSync(gitignorePath, "reviews/\n.cache/\nconfig.schema.json\n");
+  let existing: string;
+  try {
+    existing = readFileSync(gitignorePath, "utf8");
+  } catch {
+    writeFileSync(gitignorePath, `${SEEDED_IGNORE_LINES.join("\n")}\n`);
+    return;
+  }
+  const present = new Set(existing.split(/\r?\n/).map((line) => line.trim()));
+  const missing = SEEDED_IGNORE_LINES.filter((line) => !present.has(line));
+  if (missing.length === 0) return;
+  const separator = existing === "" || existing.endsWith("\n") ? "" : "\n";
+  appendFileSync(gitignorePath, `${separator}${missing.join("\n")}\n`);
 }

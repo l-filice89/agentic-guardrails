@@ -6,3 +6,6 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-6-config-plane.md`
   summary: Decide the uncommitted-config policy - whether an untracked/modified _agentic-guardrails/config.yaml may govern a gating run (current behavior: allowed, but declared in configGitStatus + a stderr warning). Candidate owner: story 1.18 (dogfood CI) or epic-level ruling.
   evidence: Review finding - an agent under review can drop an uncommitted config turning axioms advisory/off; 1.6 shipped visibility (manifest configGitStatus, stderr warning) but not policy.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-7-pipeline-hardening-and-deterministic-cache.md`
+  summary: Merged-finding disposition continuity - the FR-21 owner findingId (smallest constituent) keeps one constituent's disposition history; the other constituents' dispositions orphan on merge. Decide policy when dispositions land. Candidate owner: story 1.16 (scores/trends/dispositions).
+  evidence: Review finding on merge.ts - documented tradeoff inline, but no policy exists yet because dispositions don't exist until 1.16.

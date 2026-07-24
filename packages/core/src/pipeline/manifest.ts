@@ -41,6 +41,10 @@ export interface BuildRunManifestOptions {
   /** Effective post-default enforcement config, keyed by axiom id. */
   enforcement?: RunManifest["enforcement"];
   configGitStatus?: RunManifest["configGitStatus"];
+  /** Declared six-phase assembly (1.7). */
+  phases?: RunManifest["phases"];
+  /** Content-addressed-cache lookup counters (1.7). */
+  cache?: RunManifest["cache"];
 }
 
 export function buildRunManifest(options: BuildRunManifestOptions = {}): BuiltManifest {
@@ -62,6 +66,8 @@ export function buildRunManifest(options: BuildRunManifestOptions = {}): BuiltMa
     // Off-by-config axioms are declared (not degradation — the user chose it);
     // omitted entirely when none, keeping pre-1.6 artifact bytes unchanged.
     ...(axiomsOff.length > 0 ? { axiomsOff: [...axiomsOff].sort(numericCompare) } : {}),
+    ...(options.phases === undefined ? {} : { phases: options.phases }),
+    ...(options.cache === undefined ? {} : { cache: options.cache }),
   };
   return {
     manifest,

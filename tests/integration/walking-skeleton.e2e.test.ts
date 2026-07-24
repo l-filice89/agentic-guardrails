@@ -28,6 +28,8 @@ import {
   runManifestSchema,
 } from "@agentic-guardrails/contracts";
 
+import { normalizeCacheTruth } from "../../packages/core/src/pipeline/normalize-cache-truth.js";
+
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const cliPath = path.join(repoRoot, "packages", "cli", "dist", "index.js");
 
@@ -145,7 +147,7 @@ describe("guardrails review — walking skeleton e2e", () => {
     expect(readdirSync(artifactDir(repo)).filter((f) => f.endsWith(".tmp"))).toEqual([]);
   });
 
-  it("writes byte-identical artifact JSON across two runs on identical input", () => {
+  it("writes byte-identical artifact JSON across two runs on identical input (modulo manifest.cache)", () => {
     const repo = makeRepo();
     introduceCycle(repo);
     expect(runCli(repo).status).toBe(1);
@@ -153,7 +155,10 @@ describe("guardrails review — walking skeleton e2e", () => {
     expect(runCli(repo).status).toBe(1);
     const second = readSingleArtifact(repo);
     expect(second.file).toBe(first.file); // same run-id → same filename
-    expect(second.raw).toBe(first.raw); // byte-identical
+    // BYTE-DETERMINISM CARVE-OUT (1.7): the second run serves identical data
+    // from the deterministic cache, so `manifest.cache` hit/miss counters are
+    // the ONLY permitted byte difference — everything else must be identical.
+    expect(normalizeCacheTruth(second.raw)).toBe(normalizeCacheTruth(first.raw));
     expect(first.raw.endsWith("\n")).toBe(true);
     expect(first.raw.endsWith("\n\n")).toBe(false);
   });

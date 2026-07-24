@@ -1,27 +1,39 @@
 /**
- * The static review pipeline shell (walking skeleton, Story 1.4). Four
- * phases execute as distinct, individually-failable stages:
+ * The static review pipeline (Story 1.4 skeleton, hardened in 1.7). The
+ * six-phase shape is FIXED; membership within phases varies by
+ * scope/mode/config and is declared in the manifest:
  *
  *   0 preflight     — git repo detection + change-set discovery + tsconfig
  *                     discovery (solution-style roots expand to their
  *                     referenced projects)
- *   1 deterministic — registered analyzers via p-map, per-axiom isolation
- *   4 aggregation   — deterministic sort (merge/dedupe is 1.9 scope)
+ *   1 deterministic — registered analyzers via p-map, per-axiom isolation,
+ *                     content-addressed cache (graph + findings), wall-clock
+ *                     budget degrading to partials via AbortSignal
+ *   2 SDD gate      — declared, empty membership until Epic 2
+ *   3 LLM enrich    — declared, empty membership until Epic 3
+ *   4 aggregation   — FR-21 merge, then deterministic sort
  *   5 composition   — artifact + embedded RunManifest, byte-stable JSON,
  *                     schema-validated BEFORE any write
  *
- * Phases 2/3 (LLM tiers) exist in the pipeline SHAPE only — their membership
- * is empty until Epics 2/3. No DAG library: the phase order is a fixed
- * sequence, per-axiom isolation is a try/catch around each analyzer.
+ * No DAG library: the phase order is a fixed sequence, per-axiom isolation
+ * is a try/catch around each analyzer.
  *
  * The RunManifest is EMBEDDED in the artifact under the `manifest` key —
  * one atomic write covers both (no artifact/manifest torn-pair window).
+ *
+ * BYTE-DETERMINISM CARVE-OUT: a cache hit serves the identical DATA a cold
+ * run computes, so cold and warm artifacts are byte-identical EXCEPT for
+ * `manifest.cache` — the hit/miss counters are runtime truth and differ by
+ * design (zero silent cache behavior). Byte-identity tests therefore
+ * normalize `manifest.cache` out before comparing; nothing else may differ.
  */
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 import {
+  degradationSchema,
+  findingSchema,
   reviewArtifactSchema,
   type Degradation,
   type Finding,
@@ -30,13 +42,53 @@ import {
 } from "@agentic-guardrails/contracts";
 import pMap from "p-map";
 import { ts } from "ts-morph";
+import { z } from "zod";
 
+import { importGraphDataSchema, type ImportGraphBuildResult } from "../adapter/language-adapter.js";
 import { axiom1Structural } from "../analyzers/axiom1-structural.js";
+import { DeterministicCache, loadCacheSecret } from "../cache/deterministic-cache.js";
 import { evaluateGate, loadConfig, type GateResult } from "../config/config-loader.js";
 import { fileGitStatus, headSha, repoRoot, uncommittedFiles } from "../git/git.js";
+import { ImportGraph } from "../graph/import-graph.js";
 import { buildRunManifest, ENGINE_VERSION, numericCompare, RULESET_VERSION } from "./manifest.js";
+import { mergeFindings } from "./merge.js";
 
 export type { ReviewArtifact } from "@agentic-guardrails/contracts";
+
+/**
+ * Phase-1 wall-clock budget (ms). SPIKE-3
+ * (docs/spikes/SPIKE-3-import-graph-cost.md) measured the 1k-file full
+ * pipeline at ~0.95s median, so 30s gives ~30x headroom while still
+ * bounding runaway repos. Phases other than 1 are synchronous single steps
+ * today; per-phase budgets arrive when phases 2/3 gain async membership
+ * (Epic 2/3).
+ * ponytail: hardcoded constant — config exposure is later scope.
+ */
+export const PHASE1_BUDGET_MS = 30_000;
+
+/** Cached per-axiom analyzer result — revalidated through the contracts
+ * finding schema on every read (schema drift → typed miss). */
+const cachedAnalyzerResultSchema = z.strictObject({
+  findings: z.array(findingSchema),
+  degraded: z.array(degradationSchema),
+});
+
+/** Cached serialized import-graph build result (per tsconfig). */
+const cachedGraphSchema = z.strictObject({
+  data: importGraphDataSchema,
+  coverage: z.number().min(0).max(1),
+  attempted: z.int().min(0),
+  unresolved: z.int().min(0),
+  degraded: z.array(degradationSchema),
+});
+
+/** Content-addressed graph cache seam (1.7): graph-building analyzers route
+ * builds through this so unchanged inputs skip the parse entirely (SPIKE-3's
+ * recorded reuse win). `get` returning undefined = miss → build + `put`. */
+export interface GraphCache {
+  get(tsconfigPath: string): ImportGraphBuildResult | undefined;
+  put(tsconfigPath: string, result: ImportGraphBuildResult): void;
+}
 
 export interface AnalyzerContext {
   /** Absolute repo root (as git reports it). */
@@ -47,6 +99,13 @@ export interface AnalyzerContext {
   /** Leaf tsconfigs to analyze: the root tsconfig itself, or — for a
    * solution-style root — each referenced project's tsconfig. */
   tsconfigPaths: readonly string[];
+  /** Optional (absent in bare unit-test contexts): the content-addressed
+   * graph cache the pipeline wires in. */
+  graphCache?: GraphCache;
+  /** The phase-1 budget's abort signal, so analyzers CAN observe
+   * cancellation. Honest caveat: current analyzers are synchronous and only
+   * check between units — an in-flight unit runs to completion. */
+  signal?: AbortSignal;
 }
 
 export interface AnalyzerResult {
@@ -63,6 +122,15 @@ export interface Analyzer {
 }
 
 export const DEFAULT_ANALYZERS: readonly Analyzer[] = [axiom1Structural];
+
+/** Two analyzers registered for one axiom would silently clobber each other
+ * in the per-axiom result map — a caller bug, rejected loudly and typed. */
+export class DuplicateAnalyzerError extends Error {
+  constructor(axiom: string) {
+    super(`duplicate analyzer registration for axiom ${JSON.stringify(axiom)}`);
+    this.name = "DuplicateAnalyzerError";
+  }
+}
 
 export type ReviewRunResult =
   | { ok: false; code: "preflight" | "config" | "invalid-artifact"; message: string }
@@ -92,6 +160,10 @@ export interface RunReviewOptions {
   cwd: string;
   /** Test seam; defaults to the registered deterministic analyzers. */
   analyzers?: readonly Analyzer[];
+  /** Test seam; defaults to PHASE1_BUDGET_MS. */
+  phase1BudgetMs?: number;
+  /** Test seam; defaults to `~/.agentic-guardrails/cache-secret`. */
+  cacheSecretPath?: string;
 }
 
 export async function runReview(options: RunReviewOptions): Promise<ReviewRunResult> {
@@ -146,50 +218,238 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewRunRes
     analyzableFiles.length > 0
       ? discoverTsconfigs(root.value)
       : { tsconfigPaths: [], degraded: [] };
+  // ---- Cache plane (1.7) --------------------------------------------------
+  // Cache keys are per-UNIT content addresses, deliberately narrower than
+  // the runId: the runId includes HEAD (a new commit is a new run identity),
+  // while cache keys hash only the content that determines the unit's output
+  // — so an unrelated commit (new HEAD, identical content) still hits.
+  //
+  // ZERO SILENT CACHE BEHAVIOR: when caching cannot run (secret unavailable,
+  // cache dir unwritable, uncomputable key, nothing to cache), it is DISABLED
+  // for the whole run with a declared reason in `manifest.cache.disabled` —
+  // never a quiet fallback, never an unauthenticated read.
+  const cacheStats = { hits: 0, misses: 0, invalid: 0 };
+  const cacheDegraded: Degradation[] = [];
+  const cacheRoot = path.join(root.value, "_agentic-guardrails", ".cache");
+  const secret = loadCacheSecret(options.cacheSecretPath);
+  let cacheDisabled: string | undefined;
+  if (secret === undefined) {
+    cacheDisabled =
+      "cache secret unavailable (could not read or create ~/.agentic-guardrails/cache-secret)";
+  } else if (analyzableFiles.length === 0) {
+    cacheDisabled = "no analyzable TypeScript changes — nothing to cache";
+  } else {
+    try {
+      mkdirSync(cacheRoot, { recursive: true });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      cacheDisabled = `cache directory not writable: ${message}`;
+    }
+  }
+  // Graph key per tsconfig: tsconfig bytes + every participating file's
+  // content hash (the compiler's parsed file list — exactly the set the
+  // graph build would parse). Any unresolvable file list or unreadable
+  // participant → a declared disable, never a fake key.
+  const graphKeys = new Map<string, string>();
+  if (cacheDisabled === undefined) {
+    for (const tsconfigPath of discovery.tsconfigPaths) {
+      const key = computeGraphKey(root.value, tsconfigPath);
+      if (key === undefined) {
+        cacheDisabled = `cache key not computable for ${path.relative(root.value, tsconfigPath).replaceAll("\\", "/")} (unresolvable or unreadable inputs)`;
+        graphKeys.clear();
+        break;
+      }
+      graphKeys.set(tsconfigPath, key);
+    }
+  }
+  const cache =
+    secret === undefined ? undefined : new DeterministicCache(cacheRoot, secret);
+  const analyzableHashes = fileHashes.filter(([file]) => isAnalyzableTs(file));
+  const controller = new AbortController();
+  const graphCache: GraphCache = {
+    get(tsconfigPath) {
+      const key = graphKeys.get(tsconfigPath);
+      if (key === undefined || cache === undefined) return undefined;
+      const read = cache.get("graph", key, cachedGraphSchema);
+      if (read.hit) {
+        cacheStats.hits += 1;
+        return {
+          data: new ImportGraph(read.value.data.nodes, read.value.data.edges),
+          coverage: read.value.coverage,
+          attempted: read.value.attempted,
+          unresolved: read.value.unresolved,
+          degraded: read.value.degraded,
+        };
+      }
+      if (read.invalid) {
+        cacheStats.invalid += 1;
+        cacheDegraded.push({
+          reason: "invalid cache entry (recomputed and overwritten)",
+          subject: `cache/graph/${path.relative(root.value, tsconfigPath).replaceAll("\\", "/")}`,
+        });
+      } else {
+        cacheStats.misses += 1;
+      }
+      return undefined;
+    },
+    put(tsconfigPath, result) {
+      const key = graphKeys.get(tsconfigPath);
+      if (key === undefined || cache === undefined) return;
+      // Cache hygiene (P2): never persist post-abort work, and never let a
+      // degraded partial become a future "clean" hit.
+      if (controller.signal.aborted || result.degraded.length > 0) return;
+      cache.put("graph", key, {
+        data: result.data.toJSON(),
+        coverage: result.coverage,
+        attempted: result.attempted,
+        unresolved: result.unresolved,
+        degraded: result.degraded,
+      });
+    },
+  };
+  // Findings key (per axiom): graph keys + analyzable change hashes + scope
+  // + ruleset/engine/TypeScript versions + tier enablement. Config
+  // enforcement is NOT in the key on purpose — it never changes what an
+  // analyzer computes (off-axioms are excluded at membership level, gating
+  // happens later). The TypeScript version is a toolchain input: an upgrade
+  // can change parse output, so it must invalidate.
+  const findingsKeyFor = (axiom: string): string | undefined => {
+    if (cacheDisabled !== undefined) return undefined;
+    return createHash("sha256")
+      .update(
+        JSON.stringify([
+          "findings",
+          axiom,
+          analyzableHashes,
+          [...graphKeys.values()].sort(),
+          "uncommitted",
+          RULESET_VERSION,
+          ENGINE_VERSION,
+          ts.version,
+          { deterministic: true, llm: false },
+        ]),
+      )
+      .digest("hex");
+  };
+
   const context: AnalyzerContext = {
     repoRoot: root.value,
     changedFiles: analyzableFiles,
     tsconfigPaths: discovery.tsconfigPaths,
+    graphCache,
+    signal: controller.signal,
   };
 
   // ---- Phase 1: deterministic tier (per-axiom isolation) ------------------
   // `off` exclusion is membership-level (the analyzer never runs), so the
   // manifest can honestly declare "did not run" — not result suppression.
   const registered = options.analyzers ?? DEFAULT_ANALYZERS;
+  const seenAxioms = new Set<string>();
+  for (const analyzer of registered) {
+    if (seenAxioms.has(analyzer.axiom)) throw new DuplicateAnalyzerError(analyzer.axiom);
+    seenAxioms.add(analyzer.axiom);
+  }
   const analyzers = registered.filter((a) => config.axioms[a.axiom]?.enforcement !== "off");
   const axiomsOff = registered
     .filter((a) => config.axioms[a.axiom]?.enforcement === "off")
     .map((a) => a.axiom);
-  const results = await pMap(
-    analyzers,
-    async (analyzer): Promise<AnalyzerResult> => {
-      try {
-        return await analyzer.run(context);
-      } catch (error) {
-        // Isolation: one axiom crashing degrades the manifest, never the run.
-        const message = error instanceof Error ? error.message : String(error);
-        return {
-          findings: [],
-          degraded: [{ reason: `analyzer crashed: ${message}`, subject: `axiom-${analyzer.axiom}` }],
-        };
-      }
-    },
-    // SPIKE-3 (docs/spikes/SPIKE-3-import-graph-cost.md): sweep {2,4,8} was
-    // flat — today's analyzers are synchronous CPU-bound, so the bound is
-    // provisional by construction; 4 kept as the cap for when 1.9 registers
-    // genuinely async analyzers. Revisit if analyzers move to workers.
-    { concurrency: 4 },
-  );
+  const budgetMs = options.phase1BudgetMs ?? PHASE1_BUDGET_MS;
+  const settled = new Map<string, AnalyzerResult>();
+  const budgetTimer = setTimeout(() => controller.abort(), budgetMs);
+  try {
+    await pMap(
+      analyzers,
+      async (analyzer): Promise<void> => {
+        const key = findingsKeyFor(analyzer.axiom);
+        if (key !== undefined && cache !== undefined) {
+          const read = cache.get("findings", key, cachedAnalyzerResultSchema);
+          if (read.hit) {
+            // Hit: skip analyzer execution AND graph build — the cached
+            // entry is the identical data a cold run would compute.
+            cacheStats.hits += 1;
+            settled.set(analyzer.axiom, read.value);
+            return;
+          }
+          if (read.invalid) {
+            cacheStats.invalid += 1;
+            cacheDegraded.push({
+              reason: "invalid cache entry (recomputed and overwritten)",
+              subject: `cache/findings/axiom-${analyzer.axiom}`,
+            });
+          } else {
+            cacheStats.misses += 1;
+          }
+        }
+        let result: AnalyzerResult;
+        let crashed = false;
+        try {
+          result = await analyzer.run(context);
+        } catch (error) {
+          // Isolation: one axiom crashing degrades the manifest, never the run.
+          crashed = true;
+          const message = error instanceof Error ? error.message : String(error);
+          result = {
+            findings: [],
+            degraded: [
+              { reason: `analyzer crashed: ${message}`, subject: `axiom-${analyzer.axiom}` },
+            ],
+          };
+        }
+        settled.set(analyzer.axiom, result);
+        // Write-through — but never cache a crash (a transient failure must
+        // not become sticky until the next content change), never cache a
+        // degraded partial (it must not become a future "clean" hit), and
+        // never cache post-abort work (an aborted run must not leak results
+        // into future runs).
+        if (
+          key !== undefined &&
+          cache !== undefined &&
+          !crashed &&
+          result.degraded.length === 0 &&
+          !controller.signal.aborted
+        ) {
+          cache.put("findings", key, result);
+        }
+      },
+      // SPIKE-3 (docs/spikes/SPIKE-3-import-graph-cost.md): sweep {2,4,8} was
+      // flat — today's analyzers are synchronous CPU-bound, so the bound is
+      // provisional by construction; 4 kept as the cap for when 1.9 registers
+      // genuinely async analyzers. Revisit if analyzers move to workers.
+      { concurrency: 4, signal: controller.signal },
+    );
+  } catch (error) {
+    // The mapper never throws (isolation above) — the only EXPECTED
+    // rejection is the budget abort. Anything else is a real bug and must
+    // surface even when it races the abort: rethrow every non-abort error.
+    const name = (error as { name?: unknown } | null)?.name;
+    if (!(controller.signal.aborted && name === "AbortError")) throw error;
+  } finally {
+    clearTimeout(budgetTimer);
+  }
+  const phase1Aborted = controller.signal.aborted;
 
+  // Everything below runs synchronously to the return — an abandoned
+  // in-flight analyzer cannot mutate `settled` mid-aggregation.
   const findings: Finding[] = [];
   const runDegraded: Degradation[] = [...discovery.degraded];
-  for (const result of results) {
+  for (const analyzer of analyzers) {
+    const result = settled.get(analyzer.axiom);
+    if (result === undefined) {
+      // Budget cut this analyzer off before it completed: typed partial.
+      runDegraded.push({
+        reason: `phase 1 exceeded its ${budgetMs}ms budget — analyzer aborted before completion`,
+        subject: `axiom-${analyzer.axiom}`,
+      });
+      continue;
+    }
     findings.push(...result.findings);
     runDegraded.push(...result.degraded);
   }
+  runDegraded.push(...cacheDegraded);
 
-  // ---- Phase 4: aggregation (sort only; merge/dedupe is 1.9) --------------
-  findings.sort(byFileLineAxiom);
+  // ---- Phase 4: aggregation (FR-21 merge, then deterministic sort) --------
+  const merged = mergeFindings(findings);
+  merged.sort(byFileLineAxiom);
   runDegraded.sort((a, b) => compare(a.subject, b.subject) || compare(a.reason, b.reason));
 
   // ---- Phase 5: composition -----------------------------------------------
@@ -234,10 +494,35 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewRunRes
   );
 
   const gate = evaluateGate(
-    findings,
+    merged,
     config,
     analyzers.map((a) => a.axiom),
   );
+
+  // Declared assembly: six phases always, membership derived from
+  // scope/mode/config (off-axioms shrink phase 1), empty phases say why.
+  const phases: RunManifest["phases"] = [
+    { phase: 0, members: ["preflight"], ran: true },
+    {
+      phase: 1,
+      members: analyzers.map((a) => `axiom-${a.axiom}`).sort(numericCompare),
+      // `ran` reflects reality: false when nothing was enabled OR the budget
+      // abort cut the phase off before ANY analyzer completed; a mid-flight
+      // abort with partial completions is `ran: true` plus the reason.
+      ran: analyzers.length > 0 && settled.size > 0,
+      ...(analyzers.length === 0
+        ? { reason: "no deterministic analyzers enabled" }
+        : phase1Aborted
+          ? {
+              reason: `aborted at the ${budgetMs}ms budget — ${settled.size}/${analyzers.length} analyzers completed`,
+            }
+          : {}),
+    },
+    { phase: 2, members: [], ran: false, reason: "SDD gate — empty membership until Epic 2" },
+    { phase: 3, members: [], ran: false, reason: "LLM enrichment — empty membership until Epic 3" },
+    { phase: 4, members: ["merge", "sort"], ran: true },
+    { phase: 5, members: ["compose"], ran: true },
+  ];
 
   const { manifest, degraded: sentinelDegraded } = buildRunManifest({
     axiomsOff,
@@ -245,6 +530,13 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewRunRes
     configPresent: loaded.configPresent,
     enforcement,
     configGitStatus,
+    phases,
+    // Snapshot COPY, never the live counter object — nothing may mutate the
+    // manifest's cache truth after composition.
+    cache: {
+      ...cacheStats,
+      ...(cacheDisabled === undefined ? {} : { disabled: cacheDisabled }),
+    },
   });
   const artifact: ReviewArtifact = {
     schemaVersion: 1,
@@ -252,7 +544,7 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewRunRes
     scope: "uncommitted",
     changedFiles,
     deletedFiles,
-    findings,
+    findings: merged,
     degraded: [...sentinelDegraded, ...runDegraded],
     manifest,
     gate,
@@ -390,6 +682,45 @@ function computeRunId(
     )
     .digest("hex")
     .slice(0, 16);
+}
+
+/**
+ * Content-addressed graph cache key for one tsconfig: sha256 over the
+ * tsconfig bytes plus every participating file's path + content hash (the
+ * compiler's parsed file list — the same set the graph build parses) plus
+ * the engine and TypeScript versions (a TS upgrade can change parse output,
+ * so it must invalidate). Returns undefined (→ caching disabled for the run
+ * with a declared reason) when the file list cannot be resolved or any
+ * participant is unreadable — a wrong or fake key would serve stale graphs,
+ * no key just costs a recompute.
+ *
+ * Exported for the key-invalidation tests; `tsVersion` is their seam.
+ */
+export function computeGraphKey(
+  root: string,
+  tsconfigPath: string,
+  tsVersion: string = ts.version,
+): string | undefined {
+  try {
+    const parsed = ts.getParsedCommandLineOfConfigFile(
+      tsconfigPath,
+      {},
+      { ...ts.sys, onUnRecoverableConfigFileDiagnostic: () => undefined },
+    );
+    if (parsed === undefined) return undefined;
+    const tsconfigHash = createHash("sha256").update(readFileSync(tsconfigPath)).digest("hex");
+    const files = [...parsed.fileNames].sort().map((file) => {
+      // An unreadable participant makes the key undefined — a declared
+      // disable, never an "unreadable" sentinel masquerading as content.
+      const hash = createHash("sha256").update(readFileSync(file)).digest("hex");
+      return [path.relative(root, file).replaceAll("\\", "/"), hash];
+    });
+    return createHash("sha256")
+      .update(JSON.stringify(["graph", tsconfigHash, files, ENGINE_VERSION, tsVersion]))
+      .digest("hex");
+  } catch {
+    return undefined;
+  }
 }
 
 function compare(a: string, b: string): number {

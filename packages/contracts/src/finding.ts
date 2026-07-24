@@ -14,6 +14,10 @@ export const findingLocationSchema = z
     path: ["endLine"],
   });
 
+/** A single origin of a finding's evidence. */
+export const findingSourceSchema = z.enum(["ast", "regex", "llm"]);
+export type FindingSource = z.infer<typeof findingSourceSchema>;
+
 /**
  * The canonical Finding — the single shape every analyzer emits and every
  * consumer (pipeline, CLI, persistence, trend records) reads.
@@ -24,6 +28,13 @@ export const findingLocationSchema = z
  *   and come from `source: 'ast' | 'regex'`, never `'llm'`.
  * - `tier: 'inferred'` (LLM-tier, Epic 2+) findings come from
  *   `source: 'llm'` with a calibrated confidence in (0..1].
+ *
+ * `source` accepts a single source OR a non-empty array of sources: a
+ * MERGED finding (FR-21, story 1.7) carries the sorted union of its
+ * constituents' sources as an array; an unmerged finding stays scalar.
+ * This is the minimal contract change that expresses the merged shape
+ * without breaking existing single-source consumers (no schemaVersion
+ * bump needed — the scalar form is unchanged).
  *
  * `findingId` is the line-drift-stable identity from `computeFindingId`;
  * `ruleId` and `enclosingSymbol` are carried on the Finding so the id is
@@ -41,7 +52,17 @@ export const findingSchema = z
     location: findingLocationSchema,
     message: z.string().min(1),
     tier: z.enum(["deterministic", "inferred"]),
-    source: z.enum(["ast", "regex", "llm"]),
+    source: z.union([
+      findingSourceSchema,
+      // The array variant is a merged finding's sorted union — sorted +
+      // unique is part of the contract (byte determinism), not a convention.
+      z
+        .array(findingSourceSchema)
+        .min(1)
+        .refine((arr) => arr.every((s, i) => i === 0 || arr[i - 1]! < s), {
+          message: "merged source array must be sorted and unique",
+        }),
+    ]),
     confidence: z.number().min(0).max(1),
     severity: z.enum(["error", "warning", "info"]),
     /** Line-drift-stable anchor used in the findingId hash. */
@@ -50,6 +71,7 @@ export const findingSchema = z
     degraded: degradationSchema.optional(),
   })
   .superRefine((f, ctx) => {
+    const sources = Array.isArray(f.source) ? f.source : [f.source];
     if (f.tier === "deterministic") {
       if (f.confidence !== 1) {
         ctx.addIssue({
@@ -58,14 +80,14 @@ export const findingSchema = z
           message: "deterministic-tier findings carry the fixed maximum confidence of 1",
         });
       }
-      if (f.source === "llm") {
+      if (sources.includes("llm")) {
         ctx.addIssue({
           code: "custom",
           path: ["source"],
           message: "deterministic-tier findings come from 'ast' or 'regex', never 'llm'",
         });
       }
-    } else if (f.source !== "llm") {
+    } else if (sources.some((s) => s !== "llm")) {
       ctx.addIssue({
         code: "custom",
         path: ["source"],

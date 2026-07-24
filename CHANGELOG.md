@@ -10,6 +10,30 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Pipeline hardening + deterministic cache (Story 1.7): phase 4 now merges
+  overlapping findings per FR-21 (same file + axiom, >50% of the smaller
+  range overlapping — transitive chains merge greedily left-to-right against
+  the accumulated cluster; merged findings keep the lexicographically
+  smallest constituent `findingId` for disposition continuity, take the
+  strongest severity, union `source` into an array — the contracts finding
+  schema now accepts a source enum OR a non-empty array — and preserve both
+  messages joined with `" | "`). A content-addressed cache under
+  `_agentic-guardrails/.cache/{graph,findings}/` (gitignored; atomic writes;
+  pruned to the newest 100 entries per kind by mtime) serves import graphs
+  and per-axiom findings for unchanged inputs — keys hash change content,
+  tsconfig + participating-file content, scope, ruleset/engine versions, and
+  tier enablement (deliberately excluding HEAD, so unrelated commits still
+  hit). Hits skip analyzer execution and the graph build; every lookup is
+  declared in the manifest's new optional `cache` counters (hits/misses/
+  invalid), and cached entries revalidate through the contracts schema on
+  read — torn or stale entries recompute with a typed degradation, never a
+  crash or wrong data. Cold and warm artifacts are byte-identical except the
+  `cache` counters themselves (documented carve-out). Phase 1 runs under a
+  30s wall-clock budget (SPIKE-3-derived, AbortSignal + p-map) that degrades
+  cut-off analyzers to typed partials. The manifest's new optional `phases`
+  field declares the fixed six-phase assembly with per-phase membership
+  (phases 2/3 empty with the reason), and the CLI report header now lists
+  degraded work (subject + reason) above the findings block.
 - Config plane (Story 1.6): `guardrails review` loads
   `_agentic-guardrails/config.yaml` through the contracts `configSchema`
   (single source of truth; core parses YAML via the `yaml` package and

@@ -273,6 +273,58 @@ describe("runManifestSchema axiomsOff", () => {
   });
 });
 
+describe("runManifestSchema phases + cache (1.7)", () => {
+  const sixPhases = Array.from({ length: 6 }, (_, phase) => ({
+    phase,
+    members: [] as string[],
+    ran: false,
+    reason: "declared",
+  }));
+
+  it("accepts exactly six phases ordered 0..5 and rejects any other shape", () => {
+    const manifest = readJson("./__fixtures__/run-manifest.v1.json") as Record<string, unknown>;
+    expect(runManifestSchema.safeParse({ ...manifest, phases: sixPhases }).success).toBe(true);
+    // Five phases: the fixed shape is schema-enforced.
+    expect(
+      runManifestSchema.safeParse({ ...manifest, phases: sixPhases.slice(0, 5) }).success,
+    ).toBe(false);
+    // Six phases out of order.
+    expect(
+      runManifestSchema.safeParse({
+        ...manifest,
+        phases: [...sixPhases.slice(1), sixPhases[0]],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("accepts cache counters with an optional non-empty disabled reason", () => {
+    const manifest = readJson("./__fixtures__/run-manifest.v1.json") as Record<string, unknown>;
+    const cache = { hits: 0, misses: 0, invalid: 0 };
+    expect(runManifestSchema.safeParse({ ...manifest, cache }).success).toBe(true);
+    expect(
+      runManifestSchema.safeParse({ ...manifest, cache: { ...cache, disabled: "secret unavailable" } })
+        .success,
+    ).toBe(true);
+    // An empty disabled reason is no reason at all.
+    expect(
+      runManifestSchema.safeParse({ ...manifest, cache: { ...cache, disabled: "" } }).success,
+    ).toBe(false);
+  });
+});
+
+describe("findingSchema merged-source array (1.7)", () => {
+  it("requires the array variant to be sorted and unique", () => {
+    const merged = { ...validFinding, source: ["ast", "regex"] };
+    expect(findingSchema.safeParse(merged).success).toBe(true);
+    expect(findingSchema.safeParse({ ...validFinding, source: ["regex", "ast"] }).success).toBe(
+      false,
+    );
+    expect(findingSchema.safeParse({ ...validFinding, source: ["ast", "ast"] }).success).toBe(
+      false,
+    );
+  });
+});
+
 describe("configSchema", () => {
   it("defaults axiom 5 to blocking", () => {
     const parsed = configSchema.safeParse({});

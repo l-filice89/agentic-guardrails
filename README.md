@@ -164,9 +164,20 @@ The v2 runtime lives in a pnpm-workspaces monorepo under `packages/`:
 - `packages/cli` (`@agentic-guardrails/cli`) — the `guardrails` command.
   `guardrails review` reviews all uncommitted changes (staged, unstaged,
   untracked) through the real pipeline: preflight → deterministic analyzers
-  (first rule: `structural/circular-import`, Axiom #1) → aggregation →
-  composition. It prints a plain-text summary and atomically writes a
-  deterministic review artifact — RunManifest embedded, byte-identical for
+  (first rule: `structural/circular-import`, Axiom #1) → aggregation
+  (overlapping same-file/same-axiom findings merged per FR-21: >50%-of-the-
+  smaller-range overlap, strongest severity, source union, both messages
+  preserved) → composition. Unchanged inputs are served from a
+  content-addressed cache under `_agentic-guardrails/.cache/{graph,findings}/`
+  (gitignored, pruned to the newest 100 entries per kind): a hit skips both
+  the graph build and analyzer execution and is declared in the manifest's
+  `cache` counters; a torn or stale entry is revalidated through the
+  contracts schema and recomputed with a typed degradation — never wrong
+  data. Phase 1 runs under a wall-clock budget (30s, SPIKE-3-derived) that
+  degrades to partials via AbortSignal instead of failing the run. It prints
+  a plain-text summary (degraded work listed in the header) and atomically
+  writes a deterministic review artifact — RunManifest embedded (with the
+  declared six-phase assembly), byte-identical for
   identical input — to `_agentic-guardrails/reviews/uncommitted/<run-id>.json`
   (the `reviews/<scope>/` layout; the folder is created on demand until the
   full `init` bootstrap in Story 1.8). Exit codes: `0` clean, `1`

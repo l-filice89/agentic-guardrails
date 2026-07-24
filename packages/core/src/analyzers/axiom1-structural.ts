@@ -60,10 +60,16 @@ export const axiom1Structural: Analyzer = {
     }
 
     const adapter = new TypeScriptAdapter();
+    // Graph builds route through the content-addressed cache when the
+    // pipeline wires one in (1.7) — a hit skips the ts-morph parse entirely.
     const graphResult = mergeGraphResults(
-      context.tsconfigPaths.map((tsconfigPath) =>
-        adapter.buildImportGraph({ tsconfigPath, rootDir: context.repoRoot }),
-      ),
+      context.tsconfigPaths.map((tsconfigPath) => {
+        const cached = context.graphCache?.get(tsconfigPath);
+        if (cached !== undefined) return cached;
+        const built = adapter.buildImportGraph({ tsconfigPath, rootDir: context.repoRoot });
+        context.graphCache?.put(tsconfigPath, built);
+        return built;
+      }),
     );
     const graph = graphResult.data;
     const degraded: Degradation[] = [...graphResult.degraded];
