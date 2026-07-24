@@ -164,7 +164,7 @@ Apache-2.0 (declared per-package in each `package.json`); per-package
 
 ```bash
 pnpm install              # install workspace dependencies
-pnpm -r build             # build all packages (tsup), in topological order
+pnpm -r build             # build all packages (tsup), in topological order — run before tests (core tests import contracts/dist)
 pnpm -r test              # run each package's own tests
 pnpm test                 # run the full Vitest workspace (unit + tooling + integration)
 pnpm run lint              # ESLint, scoped to packages/**/src

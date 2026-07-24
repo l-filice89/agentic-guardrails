@@ -3,7 +3,6 @@
   "compilerOptions": {
     "target": "ES2023",
     "lib": ["ES2023"],
-    "ignoreDeprecations": "6.0",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "strict": true,

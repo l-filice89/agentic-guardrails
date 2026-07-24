@@ -6,9 +6,14 @@ on:
     branches:
       - main
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   ci:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -40,5 +45,5 @@ jobs:
       - name: Test (per-package, AC-1 oracle)
         run: pnpm -r test
 
-      - name: Test (workspace, incl. tooling self-guard tests)
-        run: pnpm test
+      - name: Test (tooling self-guard tests — unit tests already ran per-package)
+        run: pnpm test -- --project tooling --project integration

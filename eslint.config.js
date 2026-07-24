@@ -28,6 +28,30 @@ const FORBIDDEN_IMPORT_PATTERNS = [
   })),
 ];
 
+/**
+ * `no-restricted-imports` only sees static import/export declarations. These
+ * `no-restricted-syntax` selectors close the runtime channels — `import()`
+ * and `require()` with a denylisted literal — derived from the same denylist.
+ */
+// A literal `/` must be written as \u002F — it would otherwise terminate
+// esquery's /.../ regex literal inside the selector string.
+const escapeForRegex = (s) =>
+  s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\//g, "\\u002F");
+const DENIED_SOURCE_REGEX = [
+  ...LLM_SDK_DENYLIST.map((name) => `${escapeForRegex(name)}(\\u002F.*)?`),
+  ...LLM_SDK_SCOPE_PREFIXES.map((prefix) => `${escapeForRegex(prefix)}.*`),
+].join("|");
+const FORBIDDEN_DYNAMIC_IMPORT_SELECTORS = [
+  {
+    selector: `ImportExpression > Literal[value=/^(${DENIED_SOURCE_REGEX})$/]`,
+    message: CORE_LLM_FREE_MESSAGE,
+  },
+  {
+    selector: `CallExpression[callee.name="require"] > Literal[value=/^(${DENIED_SOURCE_REGEX})$/]`,
+    message: CORE_LLM_FREE_MESSAGE,
+  },
+];
+
 export default tseslint.config(
   {
     // Global ignore list -- nothing outside packages/**/src is ever linted.
@@ -44,20 +68,27 @@ export default tseslint.config(
       ".claude/**",
       ".claude-plugin/**",
       ".agents/**",
-      "scripts/**",
       "vitest.config.ts",
-      "eslint.config.js",
     ],
   },
   {
-    files: ["packages/**/src/**/*.ts"],
+    files: ["packages/**/src/**/*.{ts,mts,cts,tsx}"],
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
   },
   {
     // The forbidden-import wall: scoped to core's src tree only.
-    files: ["packages/core/**/src/**/*.ts"],
+    files: ["packages/core/**/src/**/*.{ts,mts,cts,tsx}"],
     rules: {
       "no-restricted-imports": ["error", { patterns: FORBIDDEN_IMPORT_PATTERNS }],
+      "no-restricted-syntax": ["error", ...FORBIDDEN_DYNAMIC_IMPORT_SELECTORS],
+    },
+  },
+  {
+    // The wall's own implementation gets linted too.
+    files: ["scripts/**/*.mjs", "eslint.config.js"],
+    extends: [js.configs.recommended],
+    languageOptions: {
+      globals: { process: "readonly", console: "readonly", URL: "readonly" },
     },
   },
 );

@@ -1,10 +1,12 @@
 ---
 baseline_commit: 301a201b6e7dfaefd35f77abc560f858e34910eb
+status: done
+followup_review_recommended: true
 ---
 
 # Story 1.1: Monorepo Scaffold with Guarded Boundaries
 
-Status: review
+Status: done
 
 ## Story
 
@@ -184,3 +186,38 @@ Modified:
 
 - 2026-07-24 — Boundary-wall hardening (completed from an interrupted session): `checkBoundaries` generalized to a per-package `ALLOWED_WORKSPACE_DEPS` map that fails closed for undeclared packages; denylist extended (+`@google/genai`, `ai`, `langchain`, Bedrock, Mistral, Cohere) plus whole-scope prefixes (`@ai-sdk/`, `@langchain/`); `npm:`/`workspace:` alias resolution and optional/bundled dependency fields covered; CLI split into `scripts/check-boundaries.cli.mjs` (no main-module guard, discovers `packages/*` dynamically); `eslint.config.js` now derives its forbidden-import patterns from the shared denylist so the two walls cannot drift; per-package `test` scripts scoped to their own tests. A half-applied `types` → `dist-types/` flip in both package.jsons was reverted (contradicts the recorded design: tsup owns `dist/`, nothing consumes `dist-types/`). All gates re-run green.
 - 2026-07-04 — Story 1.1 implemented: pnpm-workspaces monorepo scaffold (`contracts`, `core`), forbidden-import lint wall + structural boundary check with self-guarding tests, Vitest wiring, CI workflow, Changesets config, ADR-002/ADR-005 + README/CHANGELOG updates. All gates green from a clean install. Status → review.
+
+## Review Triage Log
+
+### 2026-07-24 — Review pass
+- intent_gap: 0
+- bad_spec: 0
+- patch: 15: (high 0, medium 3, low 12)
+- defer: 0
+- reject: 5: (high 0, medium 1, low 4)
+- addressed_findings:
+  - `[medium]` `[patch]` Per-package `test` scripts relied on Vitest config discovery that never walks up to the repo root (root-pin comment claimed otherwise) — now pass `--config ../../vitest.config.ts` explicitly.
+  - `[medium]` `[patch]` Lint-wall extension hole: `.mts`/`.cts`/`.tsx` files under `packages/core/src` escaped the forbidden-import wall — globs widened to `*.{ts,mts,cts,tsx}` (lint + wall blocks), with per-extension self-guard tests.
+  - `[medium]` `[patch]` Lint wall did not cover dynamic `import()`/`require()` — added `no-restricted-syntax` selectors derived from the shared denylist (incl. scope prefixes and subpaths), with self-guard tests for each channel plus an allowed-module negative case.
+  - `[low]` `[patch]` Changesets intent made explicit for private packages: `privatePackages: { version: true, tag: false }`.
+  - `[low]` `[patch]` Denylist extended: `@azure/openai`, `@google-cloud/vertexai`, `groq-sdk`, `together-ai`, `replicate`, `@huggingface/inference`, `llamaindex`, and the `@openrouter/` scope.
+  - `[low]` `[patch]` CLI now also scans the root manifest (LLM SDK in root tooling deps was unchecked), handles symlinked package dirs (was fail-open skip), skips manifest-less directories like pnpm does, and reports JSON parse failures with a clear message instead of a raw stack.
+  - `[low]` `[patch]` `npm:` alias parsing no longer misreads digit-leading package names (`npm:7zip-bin@^5`) as bare ranges (guard now applies to `workspace:` only), with test.
+  - `[low]` `[patch]` `pnpm.overrides`/`overrides`/`resolutions` are scanned through the same alias resolution — an override swapping an innocent name for an SDK now fails the check, with test.
+  - `[low]` `[patch]` Package-name-vs-directory mismatch is now a violation (a misnamed package would inherit another directory's allowlist), with test.
+  - `[low]` `[patch]` Dead `ignoreDeprecations: "6.0"` removed from tsconfig.base.json (typecheck clean without it).
+  - `[low]` `[patch]` README dev-commands note: build before tests (core tests import contracts/dist).
+  - `[low]` `[patch]` CI: `concurrency` group with cancel-in-progress, `timeout-minutes: 15`, and the duplicate full-workspace test run narrowed to the tooling/integration projects (unit tests already run per-package).
+  - `[low]` `[patch]` docs/adr/README.md no longer links the three planned-but-nonexistent ADR files.
+  - `[low]` `[patch]` eslint-core-boundary test imports `CORE_LLM_FREE_MESSAGE` instead of duplicating it as a regex.
+  - `[low]` `[patch]` The wall's own implementation (`scripts/**/*.mjs`, `eslint.config.js`) is now lint-covered instead of globally ignored.
+
+Rejected (with proof where empirical): `allowBuilds` in pnpm-workspace.yaml flagged as unknown — verified working (no ignored-build-scripts warning; esbuild binary functional through clean install + tsup builds). `catalog:` protocol unhandled — repo uses no catalogs and the protocol carries no alias channel. Speculative-scaffolding complaints (integration project, per-package typecheck) — spec-mandated/harmless. Unverifiable future-version pins — verified empirically by the green gate suite. Denylist-is-fail-open architecture note — by design; the allowlist layer is `ALLOWED_WORKSPACE_DEPS`.
+
+## Auto Run Result
+
+- **Summary:** Story 1.1 review pass completed. Before review, an interrupted boundary-wall hardening session found in the working tree was finished and committed (generalized fail-closed manifest check, CLI split, denylist/scope extension, drift-proof eslint wiring; a half-applied `types`→`dist-types` flip was reverted as contradicting the recorded design). The adversarial + edge-case review pass then produced 15 patches (3 medium), all applied: two closed real lint-wall coverage holes (extension glob, dynamic import/require), one fixed per-package test config discovery; the rest hardened the manifest wall (root manifest, symlinks, overrides, alias parsing, name mismatch), CI hygiene, and docs.
+- **Files changed (this pass):** `eslint.config.js` (wall extensions + dynamic-import selectors + tooling lint coverage), `scripts/check-boundaries.mjs` (denylist/scopes, overrides channel, alias fix, name-mismatch, root entry), `scripts/check-boundaries.cli.mjs` (root manifest, symlinks, parse errors), `scripts/eslint-core-boundary.test.mjs` + `scripts/check-boundaries.test.mjs` (self-guard coverage for every new channel), `packages/*/package.json` (explicit vitest config), `.changeset/config.json` (privatePackages), `.github/workflows/ci.yml` (concurrency/timeout/dedupe), `tsconfig.base.json` (dead suppression removed), `README.md`, `docs/adr/README.md`.
+- **Review findings breakdown:** 15 patched (3 medium, 12 low), 0 deferred, 5 rejected, 0 intent_gap, 0 bad_spec.
+- **Verification:** `pnpm run lint`, `pnpm run typecheck` (`tsc -b`), `pnpm run check:boundaries`, `pnpm -r build`, `pnpm -r test` (scoped per package: 1 + 2 tests), `pnpm test` (4 files / 29 tests) — all green. `pnpm install` clean (no ignored-build-script warnings).
+- **Residual risks:** The denylist remains name-based and fail-open by nature for source imports in non-`core` packages (by design — only `core` carries the wall). CI behavior of the new workflow steps is unverified until the next PR run. Branch-protection settings remain a repo-admin task (deferred item D1).

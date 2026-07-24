@@ -89,6 +89,24 @@ describe("checkBoundaries", () => {
     expect(violations.some((v) => v.includes('"@ai-sdk/openai"'))).toBe(true);
   });
 
+  it("flags a denylisted SDK smuggled in via pnpm.overrides", () => {
+    const violations = checkBoundaries({
+      contracts: {},
+      core: { pnpm: { overrides: { zod: "npm:openai@^4.0.0" } } },
+    });
+
+    expect(violations.some((v) => v.includes('"openai"'))).toBe(true);
+  });
+
+  it("flags a package whose name does not match its directory", () => {
+    const violations = checkBoundaries({
+      contracts: { name: "@agentic-guardrails/core" },
+      core: {},
+    });
+
+    expect(violations.some((v) => v.includes("name mismatch") || v.includes("is named"))).toBe(true);
+  });
+
   it("flags denylisted SDKs in optionalDependencies and bundledDependencies", () => {
     const violations = checkBoundaries({
       contracts: {},
@@ -106,6 +124,10 @@ describe("checkBoundaries", () => {
 describe("resolveDependencyNames", () => {
   it("returns the bare name for plain semver specs", () => {
     expect(resolveDependencyNames("zod", "^4.0.0")).toEqual(["zod"]);
+  });
+
+  it("extracts npm: alias targets even when the name starts with a digit", () => {
+    expect(resolveDependencyNames("x", "npm:7zip-bin@^5.0.0")).toEqual(["x", "7zip-bin"]);
   });
 
   it("extracts scoped alias targets, stripping the range", () => {

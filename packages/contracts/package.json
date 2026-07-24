@@ -17,7 +17,7 @@
   ],
   "scripts": {
     "build": "tsup",
-    "test": "vitest run packages/contracts",
+    "test": "vitest run --config ../../vitest.config.ts packages/contracts",
     "typecheck": "tsc -b"
   },
   "devDependencies": {

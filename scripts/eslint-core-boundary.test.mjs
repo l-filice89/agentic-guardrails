@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
 import { ESLint } from "eslint";
 import { describe, expect, it } from "vitest";
 
+import { CORE_LLM_FREE_MESSAGE } from "../eslint.config.js";
+
 // Regression guard for Story 1.1, Task 4: proves the `no-restricted-imports`
 // override in eslint.config.js actually fires for a file living under
 // packages/core/src/. This catches a silently-dead `files` glob forever --
@@ -18,10 +20,12 @@ import { describe, expect, it } from "vitest";
 const REPO_ROOT = path.resolve(fileURLToPath(import.meta.url), "..", "..");
 const CORE_SRC_FIXTURE_PATH = path.join(REPO_ROOT, "packages/core/src/__lint-fixture__.ts");
 
-async function lintCoreSource(code) {
+const WALL_RULES = new Set(["no-restricted-imports", "no-restricted-syntax"]);
+
+async function lintCoreSource(code, fixturePath = CORE_SRC_FIXTURE_PATH) {
   const eslint = new ESLint({ cwd: REPO_ROOT });
-  const [result] = await eslint.lintText(code, { filePath: CORE_SRC_FIXTURE_PATH });
-  return result.messages.filter((message) => message.ruleId === "no-restricted-imports");
+  const [result] = await eslint.lintText(code, { filePath: fixturePath });
+  return result.messages.filter((message) => WALL_RULES.has(message.ruleId));
 }
 
 describe("forbidden-import wall (packages/core/src)", () => {
@@ -29,14 +33,48 @@ describe("forbidden-import wall (packages/core/src)", () => {
     const messages = await lintCoreSource("import '@anthropic-ai/sdk';\n");
 
     expect(messages.length).toBeGreaterThan(0);
-    expect(messages[0].message).toMatch(/core is LLM-free \(ADR-005\)/);
+    expect(messages[0].message).toContain(CORE_LLM_FREE_MESSAGE);
   });
 
   it("fails on an @agentic-guardrails/llm import", async () => {
     const messages = await lintCoreSource("import '@agentic-guardrails/llm';\n");
 
     expect(messages.length).toBeGreaterThan(0);
-    expect(messages[0].message).toMatch(/core is LLM-free \(ADR-005\)/);
+    expect(messages[0].message).toContain(CORE_LLM_FREE_MESSAGE);
+  });
+
+  it("fails in .mts/.tsx core source too (extension hole)", async () => {
+    for (const ext of ["mts", "cts", "tsx"]) {
+      const fixture = path.join(REPO_ROOT, `packages/core/src/__lint-fixture__.${ext}`);
+      const messages = await lintCoreSource("import 'openai';\n", fixture);
+
+      expect(messages.length, `.${ext} escaped the wall`).toBeGreaterThan(0);
+    }
+  });
+
+  it("fails on a dynamic import() of a denylisted SDK", async () => {
+    const messages = await lintCoreSource("await import('@anthropic-ai/sdk');\n");
+
+    expect(messages.length).toBeGreaterThan(0);
+    expect(messages[0].message).toContain(CORE_LLM_FREE_MESSAGE);
+  });
+
+  it("fails on a dynamic import() from a denylisted scope, including subpaths", async () => {
+    const messages = await lintCoreSource("await import('@ai-sdk/openai');\n");
+
+    expect(messages.length).toBeGreaterThan(0);
+  });
+
+  it("fails on a require() of a denylisted SDK", async () => {
+    const messages = await lintCoreSource("const x = require('openai');\n");
+
+    expect(messages.length).toBeGreaterThan(0);
+  });
+
+  it("does not flag a dynamic import of an allowed module", async () => {
+    const messages = await lintCoreSource("await import('node:path');\n");
+
+    expect(messages.length).toBe(0);
   });
 
   it("fails on a denylisted SDK subpath import", async () => {

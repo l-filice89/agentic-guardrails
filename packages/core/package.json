@@ -17,7 +17,7 @@
   ],
   "scripts": {
     "build": "tsup",
-    "test": "vitest run packages/core",
+    "test": "vitest run --config ../../vitest.config.ts packages/core",
     "typecheck": "tsc -b"
   },
   "dependencies": {

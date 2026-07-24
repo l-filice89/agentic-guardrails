@@ -40,10 +40,17 @@ export const LLM_SDK_DENYLIST = [
   "@aws-sdk/client-bedrock-runtime",
   "@mistralai/mistralai",
   "cohere-ai",
+  "@azure/openai",
+  "@google-cloud/vertexai",
+  "groq-sdk",
+  "together-ai",
+  "replicate",
+  "@huggingface/inference",
+  "llamaindex",
 ];
 
 /** Whole npm scopes that are LLM SDK families. */
-export const LLM_SDK_SCOPE_PREFIXES = ["@ai-sdk/", "@langchain/"];
+export const LLM_SDK_SCOPE_PREFIXES = ["@ai-sdk/", "@langchain/", "@openrouter/"];
 
 /**
  * Permitted `@agentic-guardrails/*` dependencies per workspace package
@@ -52,6 +59,7 @@ export const LLM_SDK_SCOPE_PREFIXES = ["@ai-sdk/", "@langchain/"];
  * contracts → core → {llm, cli} → {action, plugin}).
  */
 export const ALLOWED_WORKSPACE_DEPS = {
+  "(root)": [],
   contracts: [],
   core: ["@agentic-guardrails/contracts"],
 };
@@ -77,7 +85,9 @@ export function resolveDependencyNames(name, spec) {
     if (!spec.startsWith(protocol)) continue;
     let rest = spec.slice(protocol.length);
     // `workspace:*` / `workspace:^` / `workspace:~1.2.3` carry no alias.
-    if (rest === "" || /^[*^~0-9]/.test(rest)) break;
+    // (npm: always carries a name — a digit-leading package name like
+    // `npm:7zip@1` must not be mistaken for a bare range.)
+    if (protocol === "workspace:" && (rest === "" || /^[*^~0-9]/.test(rest))) break;
     // Strip the trailing @range (the first `@` after the scope segment).
     const at = rest.indexOf("@", rest.startsWith("@") ? 1 : 0);
     if (at !== -1) rest = rest.slice(0, at);
@@ -98,6 +108,12 @@ function collectDeps(pkg) {
     const bundled = pkg?.[field];
     if (Array.isArray(bundled)) {
       for (const name of bundled) deps[name] ??= "*";
+    }
+  }
+  // Override maps can swap an innocent name for an SDK (`"zod": "npm:openai@^4"`).
+  for (const overrides of [pkg?.pnpm?.overrides, pkg?.overrides, pkg?.resolutions]) {
+    for (const [name, spec] of Object.entries(overrides ?? {})) {
+      if (typeof spec === "string") deps[name] ??= spec;
     }
   }
   return deps;
@@ -122,6 +138,14 @@ export function checkBoundaries(packagesByDir) {
         `no boundary rules declared for workspace package "${dir}" — add it to ALLOWED_WORKSPACE_DEPS in scripts/check-boundaries.mjs`,
       );
       continue;
+    }
+
+    // A package must be named after its directory, or it silently inherits
+    // another directory's allowlist rules.
+    if (dir !== "(root)" && pkg?.name && pkg.name !== `@agentic-guardrails/${dir}`) {
+      violations.push(
+        `workspace package in "packages/${dir}" is named "${pkg.name}" — expected "@agentic-guardrails/${dir}" (boundary rules are keyed by directory)`,
+      );
     }
 
     const deps = collectDeps(pkg);
