@@ -10,6 +10,14 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Canonical contracts (Story 1.2): `@agentic-guardrails/contracts` now ships
+  the full pure-Zod schema surface — `Finding` + line-drift-stable
+  `computeFindingId`, `RunManifest`, ADR-001 `axiomEnvelope` factory, config
+  schema + generated JSON Schema, generic partial-result/degradation
+  contract, OD-1 trend records, DR-1 disposition records, and the
+  `migrateArtifact` versioned-artifact migration ladder (with committed v1
+  golden fixtures). `zod` ^4 is the package's only runtime dependency
+  (test-asserted). `docs/adr/ADR-001-llm-envelope.md` accepted.
 - pnpm-workspaces monorepo scaffold for the v2 runtime: `packages/contracts`
   (`@agentic-guardrails/contracts`) and `packages/core`
   (`@agentic-guardrails/core`), ESM-only, built with tsup, typechecked via

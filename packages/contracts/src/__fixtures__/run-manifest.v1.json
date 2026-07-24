@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "ledgerHash": "1f2e3d4c5b6a79880011223344556677aabbccddeeff00112233445566778899",
+  "corpusHash": "99887766554433221100ffeeddccbbaa77665544332211009988776655443322",
+  "rulesetVersion": "1.0.0",
+  "tierEnablement": { "deterministic": true, "llm": false },
+  "engineVersion": "0.0.1"
+}

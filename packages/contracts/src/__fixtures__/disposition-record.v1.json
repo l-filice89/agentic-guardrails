@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "recordId": "disp-0001",
+  "key": {
+    "runId": "run-0001",
+    "findingId": "a3f1c2e4d5b6978800112233445566778899aabbccddeeff0011223344556677"
+  },
+  "disposition": "actionable"
+}

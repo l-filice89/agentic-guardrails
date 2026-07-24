@@ -138,9 +138,15 @@ nothing above changes until the legacy decommission milestone.
 
 The v2 runtime lives in a pnpm-workspaces monorepo under `packages/`:
 
-- `packages/contracts` (`@agentic-guardrails/contracts`) — the standalone,
-  dependency-free Zod schema package; the single source of truth for data
-  shapes crossing package boundaries.
+- `packages/contracts` (`@agentic-guardrails/contracts`) — the standalone
+  Zod schema package (sole runtime dependency: `zod`); the single source of
+  truth for data shapes crossing package boundaries: the canonical `Finding`
+  (+ `computeFindingId`, a line-drift-stable sha256 identity), `RunManifest`,
+  the ADR-001 LLM envelope factory, config (+ generated JSON Schema), the
+  generic partial-result contract, OD-1 trend records, DR-1 disposition
+  records, and a `migrateArtifact` forward-migration ladder for persisted
+  artifacts. All boundary validation is `safeParse`-based; exported helpers
+  never throw on bad input.
 - `packages/core` (`@agentic-guardrails/core`) — the deterministic,
   **LLM-free** analysis engine. This boundary is lint-enforced, not just
   documented (see `docs/adr/ADR-005-contracts-package.md`).
