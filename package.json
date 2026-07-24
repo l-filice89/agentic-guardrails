@@ -14,7 +14,7 @@
     "test": "vitest run",
     "lint": "eslint .",
     "typecheck": "tsc -b",
-    "check:boundaries": "node scripts/check-boundaries.mjs"
+    "check:boundaries": "node scripts/check-boundaries.cli.mjs"
   },
   "devDependencies": {
     "@changesets/cli": "^2.31.0",

@@ -5,20 +5,27 @@
 import js from "@eslint/js";
 import tseslint from "typescript-eslint";
 
+import { LLM_SDK_DENYLIST, LLM_SDK_SCOPE_PREFIXES } from "./scripts/check-boundaries.mjs";
+
 /** Message naming the violated boundary (ADR-005). */
 export const CORE_LLM_FREE_MESSAGE =
   "core is LLM-free (ADR-005): move LLM calls behind the envelope in @agentic-guardrails/llm";
 
 /**
  * `no-restricted-imports` `patterns` entries (not just `paths`) so that
- * subpaths (e.g. `@anthropic-ai/sdk/messages`) are caught too.
+ * subpaths (e.g. `@anthropic-ai/sdk/messages`) are caught too. Derived from
+ * the single denylist in scripts/check-boundaries.mjs so the lint wall and
+ * the manifest wall cannot drift apart.
  */
 const FORBIDDEN_IMPORT_PATTERNS = [
-  { group: ["@agentic-guardrails/llm", "@agentic-guardrails/llm/*"], message: CORE_LLM_FREE_MESSAGE },
-  { group: ["@anthropic-ai/sdk", "@anthropic-ai/sdk/*"], message: CORE_LLM_FREE_MESSAGE },
-  { group: ["openai", "openai/*"], message: CORE_LLM_FREE_MESSAGE },
-  { group: ["ollama", "ollama/*"], message: CORE_LLM_FREE_MESSAGE },
-  { group: ["@google/generative-ai", "@google/generative-ai/*"], message: CORE_LLM_FREE_MESSAGE },
+  ...LLM_SDK_DENYLIST.map((name) => ({
+    group: [name, `${name}/**`],
+    message: CORE_LLM_FREE_MESSAGE,
+  })),
+  ...LLM_SDK_SCOPE_PREFIXES.map((prefix) => ({
+    group: [`${prefix}**`],
+    message: CORE_LLM_FREE_MESSAGE,
+  })),
 ];
 
 export default tseslint.config(

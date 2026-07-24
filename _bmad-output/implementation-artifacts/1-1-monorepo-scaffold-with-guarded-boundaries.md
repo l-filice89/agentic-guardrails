@@ -163,6 +163,7 @@ New (packages):
 
 New (tooling / CI / docs):
 - scripts/check-boundaries.mjs
+- scripts/check-boundaries.cli.mjs
 - scripts/check-boundaries.test.mjs
 - scripts/eslint-core-boundary.test.mjs
 - .github/workflows/ci.yml
@@ -181,4 +182,5 @@ Modified:
 
 ## Change Log
 
+- 2026-07-24 — Boundary-wall hardening (completed from an interrupted session): `checkBoundaries` generalized to a per-package `ALLOWED_WORKSPACE_DEPS` map that fails closed for undeclared packages; denylist extended (+`@google/genai`, `ai`, `langchain`, Bedrock, Mistral, Cohere) plus whole-scope prefixes (`@ai-sdk/`, `@langchain/`); `npm:`/`workspace:` alias resolution and optional/bundled dependency fields covered; CLI split into `scripts/check-boundaries.cli.mjs` (no main-module guard, discovers `packages/*` dynamically); `eslint.config.js` now derives its forbidden-import patterns from the shared denylist so the two walls cannot drift; per-package `test` scripts scoped to their own tests. A half-applied `types` → `dist-types/` flip in both package.jsons was reverted (contradicts the recorded design: tsup owns `dist/`, nothing consumes `dist-types/`). All gates re-run green.
 - 2026-07-04 — Story 1.1 implemented: pnpm-workspaces monorepo scaffold (`contracts`, `core`), forbidden-import lint wall + structural boundary check with self-guarding tests, Vitest wiring, CI workflow, Changesets config, ADR-002/ADR-005 + README/CHANGELOG updates. All gates green from a clean install. Status → review.

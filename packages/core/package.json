@@ -17,7 +17,7 @@
   ],
   "scripts": {
     "build": "tsup",
-    "test": "vitest run",
+    "test": "vitest run packages/core",
     "typecheck": "tsc -b"
   },
   "dependencies": {

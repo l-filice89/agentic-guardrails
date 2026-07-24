@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { checkBoundaries } from "./check-boundaries.mjs";
+import { checkBoundaries, resolveDependencyNames } from "./check-boundaries.mjs";
 
 describe("checkBoundaries", () => {
   it("passes for the real contracts/core shape (contracts bare, core -> contracts only)", () => {
@@ -63,5 +63,71 @@ describe("checkBoundaries", () => {
 
   it("returns no violations for empty package descriptors", () => {
     expect(checkBoundaries({ contracts: {}, core: {} })).toEqual([]);
+  });
+
+  it("fails closed for a workspace package with no declared boundary rules", () => {
+    const violations = checkBoundaries({ contracts: {}, core: {}, llm: {} });
+
+    expect(violations.some((v) => v.includes('no boundary rules declared for workspace package "llm"'))).toBe(true);
+  });
+
+  it("flags a denylisted SDK hidden behind an npm: alias", () => {
+    const violations = checkBoundaries({
+      contracts: {},
+      core: { dependencies: { "totally-not-an-llm": "npm:openai@^4.0.0" } },
+    });
+
+    expect(violations.some((v) => v.includes('"openai"'))).toBe(true);
+  });
+
+  it("flags an SDK from a denylisted scope (e.g. @ai-sdk/*)", () => {
+    const violations = checkBoundaries({
+      contracts: {},
+      core: { dependencies: { "@ai-sdk/openai": "^1.0.0" } },
+    });
+
+    expect(violations.some((v) => v.includes('"@ai-sdk/openai"'))).toBe(true);
+  });
+
+  it("flags denylisted SDKs in optionalDependencies and bundledDependencies", () => {
+    const violations = checkBoundaries({
+      contracts: {},
+      core: {
+        optionalDependencies: { ollama: "^0.5.0" },
+        bundledDependencies: ["langchain"],
+      },
+    });
+
+    expect(violations.some((v) => v.includes('"ollama"'))).toBe(true);
+    expect(violations.some((v) => v.includes('"langchain"'))).toBe(true);
+  });
+});
+
+describe("resolveDependencyNames", () => {
+  it("returns the bare name for plain semver specs", () => {
+    expect(resolveDependencyNames("zod", "^4.0.0")).toEqual(["zod"]);
+  });
+
+  it("extracts scoped alias targets, stripping the range", () => {
+    expect(resolveDependencyNames("x", "npm:@anthropic-ai/sdk@^1.0.0")).toEqual([
+      "x",
+      "@anthropic-ai/sdk",
+    ]);
+  });
+
+  it("treats workspace:* / workspace:^ as carrying no alias", () => {
+    expect(resolveDependencyNames("@agentic-guardrails/contracts", "workspace:*")).toEqual([
+      "@agentic-guardrails/contracts",
+    ]);
+    expect(resolveDependencyNames("@agentic-guardrails/contracts", "workspace:^")).toEqual([
+      "@agentic-guardrails/contracts",
+    ]);
+  });
+
+  it("extracts workspace: alias targets", () => {
+    expect(resolveDependencyNames("x", "workspace:@agentic-guardrails/llm@*")).toEqual([
+      "x",
+      "@agentic-guardrails/llm",
+    ]);
   });
 });
