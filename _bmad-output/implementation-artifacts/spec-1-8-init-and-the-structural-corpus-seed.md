@@ -4,6 +4,7 @@ type: 'feature'
 created: '2026-07-24'
 status: 'done'
 baseline_revision: 360801a46169520ecf2ba064e71c7d05537e0702
+final_revision: d6b71ae7335cc12bcc7a1557b7e22b985a3ab390
 review_loop_iteration: 0
 followup_review_recommended: true # AUTO-FORCED: two HIGH inline findings (forever-false wiring warning; unvalidated ledger hash) + oversized acceptance
 context: []
