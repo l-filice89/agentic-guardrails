@@ -4,6 +4,7 @@ type: 'feature'
 created: '2026-07-24'
 status: 'done'
 baseline_revision: bae980873d6ee79214d7a30321c7e3346e17d2e1
+final_revision: 3d01ac7377463fdc87b25b16b4b643d94fc8ce7b
 review_loop_iteration: 0
 followup_review_recommended: true # AUTO-FORCED: high-severity inline finding (silent-omission contract violation)
 context: []
