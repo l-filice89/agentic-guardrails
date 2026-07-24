@@ -4,6 +4,7 @@ type: 'feature'
 created: '2026-07-24'
 status: 'done'
 baseline_revision: 20460ade5621625ff09fa73e4a2a5f9802e4358c
+final_revision: 1fb9253a9097c047b42bc2d53c77b13ddb69eb3f
 review_loop_iteration: 0
 followup_review_recommended: true # OVERSIZED-STORY RULE: oversized accepted (epic-defined story boundary; splitting schema families would create artificial half-contracts), elevated review posture from the start
 context: []
