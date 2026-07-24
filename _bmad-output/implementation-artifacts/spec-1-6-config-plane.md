@@ -4,6 +4,7 @@ type: 'feature'
 created: '2026-07-24'
 status: 'done'
 baseline_revision: 4191932fbb81e7c867f0901adc7fd10f64f0aa49
+final_revision: 39f0ef26189021d11c24a3f18c4e97ca0922bb8f
 review_loop_iteration: 0
 followup_review_recommended: true # AUTO-FORCED: two HIGH inline findings (silent config fallback; unauditable gating)
 context: []
