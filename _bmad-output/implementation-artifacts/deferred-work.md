@@ -9,3 +9,6 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-7-pipeline-hardening-and-deterministic-cache.md`
   summary: Merged-finding disposition continuity - the FR-21 owner findingId (smallest constituent) keeps one constituent's disposition history; the other constituents' dispositions orphan on merge. Decide policy when dispositions land. Candidate owner: story 1.16 (scores/trends/dispositions).
   evidence: Review finding on merge.ts - documented tradeoff inline, but no policy exists yet because dispositions don't exist until 1.16.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-8-init-and-the-structural-corpus-seed.md`
+  summary: Knowledge-file provenance asymmetry - an uncommitted/modified conventions.yaml or corpus-map.yaml silently governs ledgerHash/corpusHash while config.yaml gets configGitStatus + a stderr warning; decide whether the manifest should carry equivalent git-status fields for the knowledge files. Candidate owner: Epic 4 ledger stories (or 1.18 dogfood CI policy pass).
+  evidence: Review finding - the manifest records real hashes of working-tree bytes with no committed-vs-modified signal; the config plane already solved this exact visibility problem in 1.6, so the asymmetry is a gap, not a design.

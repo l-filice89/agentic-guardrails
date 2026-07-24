@@ -1,9 +1,10 @@
 /**
- * RunManifest construction — the zero-silent-degradation carrier. Inputs
- * that do not exist yet (disposition ledger, corpus baseline — both Story
- * 1.8) are recorded with the SENTINEL hash of the empty string plus an
- * explicit degraded entry naming the absence. Never a fake value presented
- * as real.
+ * RunManifest construction — the zero-silent-degradation carrier. When the
+ * committed knowledge files exist (`conventions.yaml` / `corpus-map.yaml`,
+ * seeded by `guardrails init`), `ledgerHash`/`corpusHash` are the sha256 of
+ * their bytes; an absent file is recorded with the SENTINEL hash of the
+ * empty string plus an explicit degraded entry naming the absence. Never a
+ * fake value presented as real.
  */
 import { createHash } from "node:crypto";
 
@@ -45,6 +46,12 @@ export interface BuildRunManifestOptions {
   phases?: RunManifest["phases"];
   /** Content-addressed-cache lookup counters (1.7). */
   cache?: RunManifest["cache"];
+  /** sha256 hex of committed conventions.yaml bytes (1.8); omitted → the
+   * absent-file sentinel plus its degraded entry. */
+  ledgerHash?: string;
+  /** sha256 hex of committed corpus-map.yaml bytes (1.8); omitted → the
+   * absent-file sentinel plus its degraded entry. */
+  corpusHash?: string;
 }
 
 export function buildRunManifest(options: BuildRunManifestOptions = {}): BuiltManifest {
@@ -52,8 +59,8 @@ export function buildRunManifest(options: BuildRunManifestOptions = {}): BuiltMa
   // Keys in fixed order — the manifest is embedded in the byte-stable artifact.
   const manifest: RunManifest = {
     schemaVersion: 1,
-    ledgerHash: ABSENT_SHA256,
-    corpusHash: ABSENT_SHA256,
+    ledgerHash: options.ledgerHash ?? ABSENT_SHA256,
+    corpusHash: options.corpusHash ?? ABSENT_SHA256,
     rulesetVersion: RULESET_VERSION,
     tierEnablement: { deterministic: true, llm: false },
     engineVersion: ENGINE_VERSION,
@@ -69,17 +76,20 @@ export function buildRunManifest(options: BuildRunManifestOptions = {}): BuiltMa
     ...(options.phases === undefined ? {} : { phases: options.phases }),
     ...(options.cache === undefined ? {} : { cache: options.cache }),
   };
-  return {
-    manifest,
-    degraded: [
-      {
-        reason: "disposition ledger absent until init (story 1.8); sentinel hash recorded",
-        subject: "ledger",
-      },
-      {
-        reason: "corpus baseline absent until init (story 1.8); sentinel hash recorded",
-        subject: "corpus",
-      },
-    ],
-  };
+  // A real hash drops the matching degradation; an absent file keeps the
+  // sentinel + declaration exactly as before init existed.
+  const degraded: Degradation[] = [];
+  if (options.ledgerHash === undefined) {
+    degraded.push({
+      reason: "disposition ledger absent until init (story 1.8); sentinel hash recorded",
+      subject: "ledger",
+    });
+  }
+  if (options.corpusHash === undefined) {
+    degraded.push({
+      reason: "corpus baseline absent until init (story 1.8); sentinel hash recorded",
+      subject: "corpus",
+    });
+  }
+  return { manifest, degraded };
 }

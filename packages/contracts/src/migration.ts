@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { dispositionRecordSchema } from "./disposition-record.js";
+import { conventionsFileSchema, corpusMapFileSchema } from "./ledger.js";
 import { reviewArtifactSchema } from "./review-artifact.js";
 import { runManifestSchema } from "./run-manifest.js";
 import { trendRecordSchema } from "./trend-record.js";
@@ -26,6 +27,8 @@ export interface ArtifactTypeMap {
   "trend-record": z.infer<typeof trendRecordSchema>;
   "disposition-record": z.infer<typeof dispositionRecordSchema>;
   "review-artifact": z.infer<typeof reviewArtifactSchema>;
+  conventions: z.infer<typeof conventionsFileSchema>;
+  "corpus-map": z.infer<typeof corpusMapFileSchema>;
 }
 
 /**
@@ -39,6 +42,8 @@ const registry: Record<string, ArtifactLadder> = Object.assign(Object.create(nul
   "trend-record": { currentVersion: 1, schema: trendRecordSchema, steps: {} },
   "disposition-record": { currentVersion: 1, schema: dispositionRecordSchema, steps: {} },
   "review-artifact": { currentVersion: 1, schema: reviewArtifactSchema, steps: {} },
+  conventions: { currentVersion: 1, schema: conventionsFileSchema, steps: {} },
+  "corpus-map": { currentVersion: 1, schema: corpusMapFileSchema, steps: {} },
 });
 
 export type MigrateResult<T = unknown> =

@@ -32,6 +32,8 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 import {
+  conventionsFileSchema,
+  corpusMapFileSchema,
   degradationSchema,
   findingSchema,
   reviewArtifactSchema,
@@ -42,6 +44,7 @@ import {
 } from "@agentic-guardrails/contracts";
 import pMap from "p-map";
 import { ts } from "ts-morph";
+import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 
 import { importGraphDataSchema, type ImportGraphBuildResult } from "../adapter/language-adapter.js";
@@ -50,7 +53,14 @@ import { DeterministicCache, loadCacheSecret } from "../cache/deterministic-cach
 import { evaluateGate, loadConfig, type GateResult } from "../config/config-loader.js";
 import { fileGitStatus, headSha, repoRoot, uncommittedFiles } from "../git/git.js";
 import { ImportGraph } from "../graph/import-graph.js";
-import { buildRunManifest, ENGINE_VERSION, numericCompare, RULESET_VERSION } from "./manifest.js";
+import { checkGitWiring } from "../init/wiring.js";
+import {
+  ABSENT_SHA256,
+  buildRunManifest,
+  ENGINE_VERSION,
+  numericCompare,
+  RULESET_VERSION,
+} from "./manifest.js";
 import { mergeFindings } from "./merge.js";
 
 export type { ReviewArtifact } from "@agentic-guardrails/contracts";
@@ -123,6 +133,11 @@ export interface Analyzer {
 
 export const DEFAULT_ANALYZERS: readonly Analyzer[] = [axiom1Structural];
 
+/** Axiom ids the pipeline treats as known BEYOND the registered analyzers:
+ * axiom 5 (security) is configurable before its analyzer lands (Epic 3).
+ * Single source for the unknown-axiom warning and the init questionnaire. */
+export const ANALYZERLESS_KNOWN_AXIOMS: readonly string[] = ["5"];
+
 /** Two analyzers registered for one axiom would silently clobber each other
  * in the per-axiom result map — a caller bug, rejected loudly and typed. */
 export class DuplicateAnalyzerError extends Error {
@@ -154,6 +169,10 @@ export type ReviewRunResult =
       /** Non-fatal config-plane warnings (schema-file write failure, config
        * entries matching no known axiom) — stderr lines, never exit-code 2. */
       configWarnings: string[];
+      /** Preflight git-wiring warnings (1.8): missing `.gitattributes`/
+       * `.gitignore` lines in an initialized repo — their own channel so
+       * the CLI does not misattribute them to the config plane. */
+      wiringWarnings: string[];
     };
 
 export interface RunReviewOptions {
@@ -186,6 +205,11 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewRunRes
   const loaded = loadConfig(root.value);
   if (!loaded.ok) return { ok: false, code: "config", message: loaded.message };
   const config = loaded.config;
+
+  // Preflight git-wiring check (1.8): warnings naming the consequence when
+  // an initialized repo lost its `.gitattributes`/`.gitignore` lines —
+  // never exit 2, and silent for an uninitialized repo (no folder).
+  const wiringWarnings = checkGitWiring(root.value);
 
   // The engine's own output directory is never part of the reviewed change
   // set (a written artifact must not change the next run's identity).
@@ -447,6 +471,26 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewRunRes
   }
   runDegraded.push(...cacheDegraded);
 
+  // Manifest truth (1.8): committed knowledge files hash their real bytes;
+  // an absent file keeps the sentinel + its "absent until init" declaration
+  // (excluded from runDegraded — see ReviewRunResult.runDegraded); a
+  // present-but-unreadable or present-but-invalid file is a REAL
+  // degradation counted toward the exit-2 logic.
+  const ledger = hashKnowledgeFile(
+    root.value,
+    "_agentic-guardrails/conventions.yaml",
+    conventionsFileSchema,
+    "ledger",
+  );
+  const corpus = hashKnowledgeFile(
+    root.value,
+    "_agentic-guardrails/corpus-map.yaml",
+    corpusMapFileSchema,
+    "corpus",
+  );
+  if (ledger.degradation !== undefined) runDegraded.push(ledger.degradation);
+  if (corpus.degradation !== undefined) runDegraded.push(corpus.degradation);
+
   // ---- Phase 4: aggregation (FR-21 merge, then deterministic sort) --------
   const merged = mergeFindings(findings);
   merged.sort(byFileLineAxiom);
@@ -454,7 +498,7 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewRunRes
 
   // ---- Phase 5: composition -----------------------------------------------
   // Config-plane visibility: warnings (never degradations, never exit 2).
-  const knownAxioms = new Set([...registered.map((a) => a.axiom), "5"]);
+  const knownAxioms = new Set([...registered.map((a) => a.axiom), ...ANALYZERLESS_KNOWN_AXIOMS]);
   const configWarnings = [
     ...loaded.warnings,
     ...Object.keys(config.axioms)
@@ -526,6 +570,8 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewRunRes
 
   const { manifest, degraded: sentinelDegraded } = buildRunManifest({
     axiomsOff,
+    ...(ledger.hash === undefined ? {} : { ledgerHash: ledger.hash }),
+    ...(corpus.hash === undefined ? {} : { corpusHash: corpus.hash }),
     configHash: loaded.configHash,
     configPresent: loaded.configPresent,
     enforcement,
@@ -570,7 +616,65 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewRunRes
     configPresent: loaded.configPresent,
     deviations: loaded.deviations,
     configWarnings,
+    wiringWarnings,
   };
+}
+
+/**
+ * Manifest hash for one committed knowledge file (1.8). Absent (ENOENT) →
+ * no hash (the manifest builder records the sentinel + its "absent until
+ * init" declaration). Any other read error → sentinel hash + a degradation
+ * naming the read error (an EACCES/EISDIR is NOT absence). Present but
+ * failing yaml-parse or the contracts schema → the REAL sha256 of the
+ * bytes (truth about what's there) + a degradation naming the invalidity.
+ * Valid → real hash, no degradation.
+ */
+function hashKnowledgeFile(
+  root: string,
+  relPath: string,
+  schema: z.ZodType,
+  subject: string,
+): { hash?: string; degradation?: Degradation } {
+  const name = path.basename(relPath);
+  let bytes: Buffer;
+  try {
+    bytes = readFileSync(path.join(root, relPath));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      hash: ABSENT_SHA256,
+      degradation: { reason: `${name} unreadable: ${firstLine(message)}`, subject },
+    };
+  }
+  const hash = createHash("sha256").update(bytes).digest("hex");
+  let raw: unknown;
+  try {
+    raw = parseYaml(bytes.toString("utf8"));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      hash,
+      degradation: { reason: `${name} present but invalid: ${firstLine(message)}`, subject },
+    };
+  }
+  const parsed = schema.safeParse(raw);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    const where = issue === undefined ? "(root)" : issue.path.map(String).join(".") || "(root)";
+    return {
+      hash,
+      degradation: {
+        reason: `${name} present but invalid: ${where}: ${issue?.message ?? "unknown issue"}`,
+        subject,
+      },
+    };
+  }
+  return { hash };
+}
+
+function firstLine(message: string): string {
+  return message.split("\n")[0] ?? message;
 }
 
 /** Analyzable change-set membership: runtime TS sources only — `.d.ts`
@@ -580,7 +684,7 @@ function isAnalyzableTs(file: string): boolean {
   return /\.(ts|tsx|mts|cts)$/.test(file);
 }
 
-interface TsconfigDiscovery {
+export interface TsconfigDiscovery {
   tsconfigPaths: string[];
   degraded: Degradation[];
 }
@@ -590,9 +694,10 @@ interface TsconfigDiscovery {
  * `include`, non-empty `references`) contains no sources itself — each
  * referenced project's tsconfig is resolved and analyzed instead, and the
  * per-project graphs are merged downstream. A missing root tsconfig is a
- * typed degradation, never a throw.
+ * typed degradation, never a throw. Exported for the init seed build (1.8)
+ * — one discovery implementation.
  */
-function discoverTsconfigs(root: string): TsconfigDiscovery {
+export function discoverTsconfigs(root: string): TsconfigDiscovery {
   const rootTsconfig = path.join(root, "tsconfig.json");
   if (!existsSync(rootTsconfig)) {
     return {

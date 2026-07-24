@@ -48,8 +48,9 @@ if (!DEFAULTS_PARSE.success) {
 }
 const DEFAULT_CONFIG: Config = DEFAULTS_PARSE.data;
 
-/** Effective per-key defaults the gate applies to any unconfigured axiom. */
-const EFFECTIVE_DEFAULTS = { enforcement: "blocking", maxFindings: 0 } as const;
+/** Effective per-key defaults the gate applies to any unconfigured axiom.
+ * Exported so the init questionnaire (1.8) sources the same defaults. */
+export const EFFECTIVE_DEFAULTS = { enforcement: "blocking", maxFindings: 0 } as const;
 
 export type LoadConfigResult =
   | {

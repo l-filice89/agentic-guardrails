@@ -10,6 +10,27 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- `guardrails init` + structural corpus seed (Story 1.8): bootstraps
+  `_agentic-guardrails/` — `config.yaml` from the 1.6 default constants or a
+  per-axiom TTY questionnaire (option values sourced from the contracts
+  schema; `--no-input`/non-TTY stdin writes defaults, no prompt ever
+  blocks), empty-but-valid `conventions.yaml` + `corpus-map.yaml` (new
+  contracts `ledger.ts` schemas, registered in the migration ladder with
+  golden fixtures), `.gitattributes` with `history/*.jsonl merge=union`
+  (inside `_agentic-guardrails/` — user root git files untouched), and the
+  seeded `.gitignore`. Builds a regenerable file-level structural seed
+  (sorted `{file, fanIn}` per merged-import-graph node, partial-result
+  envelope carried) as a plain atomic file at
+  `.cache/corpus/structural-seed.json`; no tsconfig → skipped with a
+  declared reason. Init writes only MISSING files (never clobbers; per-file
+  created-vs-kept summary; wiring lines appended, user content verbatim);
+  exit 0 success / 2 typed failure (not a git repo, write error). Review's
+  phase-0 preflight now verifies the git wiring when `_agentic-guardrails/`
+  exists (missing line → stderr warning naming the consequence, never exit
+  2), and the manifest's `ledgerHash`/`corpusHash` become the sha256 of the
+  committed `conventions.yaml`/`corpus-map.yaml` bytes with their "absent
+  until init" degradations dropped (absent files keep sentinel +
+  degradation exactly as before).
 - Pipeline hardening + deterministic cache (Story 1.7): phase 4 now merges
   overlapping findings per FR-21 (same file + axiom, >50% of the smaller
   range overlapping — transitive chains merge greedily left-to-right against

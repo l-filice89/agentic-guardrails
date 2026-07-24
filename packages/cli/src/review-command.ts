@@ -41,6 +41,11 @@ export async function reviewCommand(cwd: string): Promise<number> {
     for (const warning of result.configWarnings) {
       process.stderr.write(`guardrails review: config: ${warning}\n`);
     }
+    // Git-wiring preflight warnings (1.8) — their own channel, not the
+    // config plane's.
+    for (const warning of result.wiringWarnings) {
+      process.stderr.write(`guardrails review: ${warning}\n`);
+    }
     // An uncommitted config governs gating — worth one visible line (policy
     // beyond visibility is deferred).
     const configGitStatus = result.artifact.manifest.configGitStatus;

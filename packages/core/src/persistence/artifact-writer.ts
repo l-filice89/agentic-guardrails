@@ -5,11 +5,10 @@
  * best-effort: the directory fsync below is unsupported on some platforms.)
  * The minimal `_agentic-guardrails/reviews/<scope>/` tree — plus a
  * `.gitignore` keeping generated output out of the analyzed repo's history —
- * is created on demand (full bootstrap is Story 1.8).
+ * is created on demand (`guardrails init` bootstraps the full layout).
  */
 import { randomBytes } from "node:crypto";
 import {
-  appendFileSync,
   closeSync,
   fsyncSync,
   mkdirSync,
@@ -17,7 +16,6 @@ import {
   readFileSync,
   renameSync,
   rmSync,
-  writeFileSync,
   writeSync,
 } from "node:fs";
 import path from "node:path";
@@ -94,28 +92,43 @@ export function writeFileAtomic(finalPath: string, content: string): void {
 }
 
 /** The generated layers the seeded output .gitignore must cover. */
-const SEEDED_IGNORE_LINES = ["reviews/", ".cache/", "config.schema.json"];
+export const SEEDED_IGNORE_LINES = ["reviews/", ".cache/", "config.schema.json"];
 
 /**
  * Ensures `_agentic-guardrails/.gitignore` covers the generated layers
  * (`reviews/`, `.cache/`, schema file) while leaving the committed layer
- * (Story 1.8 config/ledger files) committable. An existing file is
- * user-editable territory: any user content is preserved verbatim, but
- * missing seeded lines are APPENDED — a pre-1.7 file must not silently
- * leave `.cache/` committable.
+ * (Story 1.8 config/ledger files) committable.
  */
 function ensureOutputGitignore(outRoot: string): void {
-  const gitignorePath = path.join(outRoot, ".gitignore");
+  ensureLines(path.join(outRoot, ".gitignore"), SEEDED_IGNORE_LINES);
+}
+
+/**
+ * Append-missing-lines primitive shared by the on-demand `.gitignore`
+ * seeding and the `init` git wiring (Story 1.8). A missing file is created
+ * with exactly the seeded lines; an existing file is user-editable
+ * territory — user content is preserved verbatim and only missing lines are
+ * APPENDED, matching the file's existing EOL style (a CRLF file stays
+ * CRLF). The whole content is rewritten atomically — a reader can never
+ * observe a torn file. Returns what happened so `init` can report
+ * created-vs-updated-vs-kept.
+ */
+export function ensureLines(
+  filePath: string,
+  lines: readonly string[],
+): "created" | "appended" | "unchanged" {
   let existing: string;
   try {
-    existing = readFileSync(gitignorePath, "utf8");
+    existing = readFileSync(filePath, "utf8");
   } catch {
-    writeFileSync(gitignorePath, `${SEEDED_IGNORE_LINES.join("\n")}\n`);
-    return;
+    writeFileAtomic(filePath, `${lines.join("\n")}\n`);
+    return "created";
   }
   const present = new Set(existing.split(/\r?\n/).map((line) => line.trim()));
-  const missing = SEEDED_IGNORE_LINES.filter((line) => !present.has(line));
-  if (missing.length === 0) return;
-  const separator = existing === "" || existing.endsWith("\n") ? "" : "\n";
-  appendFileSync(gitignorePath, `${separator}${missing.join("\n")}\n`);
+  const missing = lines.filter((line) => !present.has(line));
+  if (missing.length === 0) return "unchanged";
+  const eol = existing.includes("\r\n") ? "\r\n" : "\n";
+  const separator = existing === "" || existing.endsWith("\n") ? "" : eol;
+  writeFileAtomic(filePath, `${existing}${separator}${missing.join(eol)}${eol}`);
+  return "appended";
 }

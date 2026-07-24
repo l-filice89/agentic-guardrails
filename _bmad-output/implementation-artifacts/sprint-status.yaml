@@ -51,7 +51,7 @@ development_status:
   1-5-spike-3-import-graph-cost-at-scale-gate: done
   1-6-config-plane: done
   1-7-pipeline-hardening-and-deterministic-cache: done
-  1-8-init-and-the-structural-corpus-seed: backlog
+  1-8-init-and-the-structural-corpus-seed: done
   1-9-axiom-1-structural-analyzer-full-rule-set: backlog
   1-10-axiom-3-cleanliness-analyzer-ast-tier: backlog
   1-11-axiom-4-nfr-analyzer-structural-tier: backlog

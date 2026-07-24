@@ -12,7 +12,7 @@ describe("buildRunManifest", () => {
     expect(manifest.modelIdentity).toBeUndefined();
   });
 
-  it("uses the empty-string sha256 sentinel for absent ledger and corpus", () => {
+  it("uses the empty-string sha256 sentinel for absent ledger and corpus (uninitialized)", () => {
     const { manifest } = buildRunManifest();
     // The literal sha256 of "" — a recognizable sentinel, never a faked hash.
     expect(ABSENT_SHA256).toBe(
@@ -52,5 +52,24 @@ describe("buildRunManifest", () => {
     for (const entry of degraded) {
       expect(entry.reason).toContain("absent until init (story 1.8)");
     }
+  });
+
+  it("carries real ledger/corpus hashes when provided and DROPS their degradations (1.8)", () => {
+    const ledgerHash = "a".repeat(64);
+    const corpusHash = "b".repeat(64);
+    const { manifest, degraded } = buildRunManifest({ ledgerHash, corpusHash });
+    expect(manifest.ledgerHash).toBe(ledgerHash);
+    expect(manifest.corpusHash).toBe(corpusHash);
+    expect(degraded).toEqual([]);
+    expect(runManifestSchema.safeParse(manifest).success).toBe(true);
+  });
+
+  it("keeps sentinel + degradation independently per absent file (both directions)", () => {
+    const ledgerOnly = buildRunManifest({ ledgerHash: "a".repeat(64) });
+    expect(ledgerOnly.manifest.corpusHash).toBe(ABSENT_SHA256);
+    expect(ledgerOnly.degraded.map((d) => d.subject)).toEqual(["corpus"]);
+    const corpusOnly = buildRunManifest({ corpusHash: "b".repeat(64) });
+    expect(corpusOnly.manifest.ledgerHash).toBe(ABSENT_SHA256);
+    expect(corpusOnly.degraded.map((d) => d.subject)).toEqual(["ledger"]);
   });
 });

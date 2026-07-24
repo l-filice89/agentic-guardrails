@@ -11,6 +11,7 @@ export * from "./disposition-record.js";
 export * from "./envelope.js";
 export * from "./finding.js";
 export * from "./finding-id.js";
+export * from "./ledger.js";
 export * from "./migration.js";
 export * from "./partial-result.js";
 export * from "./review-artifact.js";

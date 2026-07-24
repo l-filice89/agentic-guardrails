@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   mkdirSync,
   mkdtempSync,
@@ -258,7 +259,17 @@ describe("runReview config plane (1.6)", () => {
     const result = await runReview({ cwd, analyzers: [okAnalyzer] });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
+    // Pinned EXACTLY: config warnings carry only config-plane lines, and
+    // the wiring warnings (this fixture IS initialized via config.yaml,
+    // with no wiring files) ride their own channel — the full set, no
+    // toContain blind spots.
     expect(result.configWarnings).toEqual(["axioms.7 matches no known axiom"]);
+    expect(result.wiringWarnings).toEqual([
+      '_agentic-guardrails/.gitattributes is missing "history/*.jsonl merge=union" — history JSONL will merge with conflicts (run `guardrails init`)',
+      '_agentic-guardrails/.gitignore is missing "reviews/" — review artifacts may be committed (run `guardrails init`)',
+      '_agentic-guardrails/.gitignore is missing ".cache/" — .cache/ may be committed (run `guardrails init`)',
+      '_agentic-guardrails/.gitignore is missing "config.schema.json" — the generated schema file may be committed (run `guardrails init`)',
+    ]);
     expect(result.degradedRun).toBe(false);
   });
 
@@ -685,4 +696,160 @@ describe("runReview merge step (phase 4, FR-21)", () => {
       location: { file: "change.ts", startLine: 10, endLine: 25 },
     });
   });
+});
+
+describe("runReview manifest truth + wiring preflight (1.8)", () => {
+  it("hashes committed conventions/corpus-map bytes and drops the sentinel degradations", async () => {
+    const cwd = tempRepoWithChange();
+    const outRoot = path.join(cwd, "_agentic-guardrails");
+    mkdirSync(outRoot, { recursive: true });
+    const conventions = "schemaVersion: 1\nconventions: []\n";
+    const corpusMap = "schemaVersion: 1\nhumanConfirmed: []\n";
+    writeFileSync(path.join(outRoot, "conventions.yaml"), conventions);
+    writeFileSync(path.join(outRoot, "corpus-map.yaml"), corpusMap);
+    const result = await runReview({ cwd, analyzers: [cleanAnalyzer] });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.artifact.manifest.ledgerHash).toBe(
+      createHash("sha256").update(conventions).digest("hex"),
+    );
+    expect(result.artifact.manifest.corpusHash).toBe(
+      createHash("sha256").update(corpusMap).digest("hex"),
+    );
+    const subjects = result.artifact.degraded.map((d) => d.subject);
+    expect(subjects).not.toContain("ledger");
+    expect(subjects).not.toContain("corpus");
+  });
+
+  it("keeps the other file's sentinel when only one knowledge file exists", async () => {
+    const cwd = tempRepoWithChange();
+    const outRoot = path.join(cwd, "_agentic-guardrails");
+    mkdirSync(outRoot, { recursive: true });
+    writeFileSync(path.join(outRoot, "conventions.yaml"), "schemaVersion: 1\nconventions: []\n");
+    const result = await runReview({ cwd, analyzers: [cleanAnalyzer] });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.artifact.manifest.ledgerHash).not.toBe(
+      "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    );
+    expect(result.artifact.manifest.corpusHash).toBe(
+      "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    );
+    expect(result.artifact.degraded.map((d) => d.subject)).toContain("corpus");
+    expect(result.artifact.degraded.map((d) => d.subject)).not.toContain("ledger");
+  });
+
+  it("warns (wiringWarnings channel, never a failure) when wiring lines are missing from an INITIALIZED folder", async () => {
+    const cwd = tempRepoWithChange();
+    // An init marker exists but neither wiring file does — all warnings fire.
+    mkdirSync(path.join(cwd, "_agentic-guardrails"), { recursive: true });
+    writeFileSync(
+      path.join(cwd, "_agentic-guardrails", "conventions.yaml"),
+      "schemaVersion: 1\nconventions: []\n",
+    );
+    const result = await runReview({ cwd, analyzers: [cleanAnalyzer] });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.wiringWarnings.join("\n")).toContain("history JSONL will merge with conflicts");
+    expect(result.wiringWarnings.join("\n")).toContain(".cache/ may be committed");
+    expect(result.wiringWarnings.join("\n")).toContain("review artifacts may be committed");
+    expect(result.wiringWarnings.join("\n")).toContain("the generated schema file may be committed");
+    expect(result.configWarnings).toEqual([]); // wiring is not the config plane
+    expect(result.degradedRun).toBe(false); // a warning is never a degradation
+  });
+
+  it("stays silent for an uninitialized repo (no _agentic-guardrails/ folder)", async () => {
+    const cwd = tempRepoWithChange();
+    const result = await runReview({ cwd, analyzers: [cleanAnalyzer] });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.configWarnings).toEqual([]);
+    expect(result.wiringWarnings).toEqual([]);
+    // Uninitialized: sentinels + degradations exactly as before 1.8.
+    expect(result.artifact.degraded.map((d) => d.subject)).toEqual(["ledger", "corpus"]);
+  });
+
+  it("stays silent for a marker-less folder the artifact writer auto-created (no init ran)", async () => {
+    const cwd = tempRepoWithChange();
+    // What a first review leaves behind on a never-initialized repo.
+    mkdirSync(path.join(cwd, "_agentic-guardrails"), { recursive: true });
+    writeFileSync(
+      path.join(cwd, "_agentic-guardrails", ".gitignore"),
+      "reviews/\n.cache/\nconfig.schema.json\n",
+    );
+    const result = await runReview({ cwd, analyzers: [cleanAnalyzer] });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.wiringWarnings).toEqual([]);
+  });
+
+  const KNOWLEDGE_FILES = [
+    ["conventions.yaml", "ledger", "schemaVersion: 7\nconventions: []\n"],
+    ["corpus-map.yaml", "corpus", "schemaVersion: 7\nhumanConfirmed: []\n"],
+  ] as const;
+
+  for (const [file, subject, schemaInvalid] of KNOWLEDGE_FILES) {
+    it(`${file}: garbage bytes get a REAL sha256 plus an invalidity degradation (exit-2 class)`, async () => {
+      const cwd = tempRepoWithChange();
+      const outRoot = path.join(cwd, "_agentic-guardrails");
+      mkdirSync(outRoot, { recursive: true });
+      writeFileSync(path.join(outRoot, file), "hello");
+      const result = await runReview({ cwd, analyzers: [cleanAnalyzer] });
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      const hashKey = subject === "ledger" ? "ledgerHash" : "corpusHash";
+      expect(result.artifact.manifest[hashKey]).toBe(
+        createHash("sha256").update("hello").digest("hex"),
+      );
+      const degradation = result.runDegraded.find((d) => d.subject === subject);
+      expect(degradation?.reason).toContain(`${file} present but invalid`);
+      expect(result.degradedRun).toBe(true); // counts toward exit 2
+    });
+
+    it(`${file}: schema-invalid YAML keeps the real hash + a degradation naming the path`, async () => {
+      const cwd = tempRepoWithChange();
+      const outRoot = path.join(cwd, "_agentic-guardrails");
+      mkdirSync(outRoot, { recursive: true });
+      writeFileSync(path.join(outRoot, file), schemaInvalid);
+      const result = await runReview({ cwd, analyzers: [cleanAnalyzer] });
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      const degradation = result.runDegraded.find((d) => d.subject === subject);
+      expect(degradation?.reason).toContain(`${file} present but invalid`);
+      expect(degradation?.reason).toContain("schemaVersion");
+      expect(result.degradedRun).toBe(true);
+    });
+
+    it(`${file}: a directory at the path is a READ error (sentinel hash), never "absent until init"`, async () => {
+      const cwd = tempRepoWithChange();
+      mkdirSync(path.join(cwd, "_agentic-guardrails", file), { recursive: true });
+      const result = await runReview({ cwd, analyzers: [cleanAnalyzer] });
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      const hashKey = subject === "ledger" ? "ledgerHash" : "corpusHash";
+      expect(result.artifact.manifest[hashKey]).toBe(
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      );
+      const degradation = result.runDegraded.find((d) => d.subject === subject);
+      expect(degradation?.reason).toContain(`${file} unreadable`);
+      expect(degradation?.reason).not.toContain("absent until init");
+      expect(result.degradedRun).toBe(true);
+    });
+
+    it(`${file}: a valid file hashes clean — no degradation, run not degraded`, async () => {
+      const cwd = tempRepoWithChange();
+      const outRoot = path.join(cwd, "_agentic-guardrails");
+      mkdirSync(outRoot, { recursive: true });
+      const valid =
+        subject === "ledger"
+          ? "schemaVersion: 1\nconventions: []\n"
+          : "schemaVersion: 1\nhumanConfirmed: []\n";
+      writeFileSync(path.join(outRoot, file), valid);
+      const result = await runReview({ cwd, analyzers: [cleanAnalyzer] });
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.runDegraded.find((d) => d.subject === subject)).toBeUndefined();
+      expect(result.degradedRun).toBe(false);
+    });
+  }
 });

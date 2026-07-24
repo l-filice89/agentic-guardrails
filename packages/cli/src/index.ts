@@ -12,6 +12,7 @@ import { Command, CommanderError } from "commander";
 
 import { ENGINE_VERSION } from "@agentic-guardrails/core";
 
+import { initCommand } from "./init-command.js";
 import { reviewCommand } from "./review-command.js";
 
 const program = new Command();
@@ -20,6 +21,14 @@ program
   .description("Deterministic-first code review guardrails")
   // Single-sourced from core (see ENGINE_VERSION's provenance comment).
   .version(ENGINE_VERSION);
+
+program
+  .command("init")
+  .description("Bootstrap _agentic-guardrails/ (config, ledger files, git wiring, seed)")
+  .option("--no-input", "skip the questionnaire and write documented defaults")
+  .action(async (options: { input?: boolean }) => {
+    process.exitCode = await initCommand(process.cwd(), options);
+  });
 
 program
   .command("review")

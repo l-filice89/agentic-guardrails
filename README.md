@@ -179,11 +179,32 @@ The v2 runtime lives in a pnpm-workspaces monorepo under `packages/`:
   writes a deterministic review artifact — RunManifest embedded (with the
   declared six-phase assembly), byte-identical for
   identical input — to `_agentic-guardrails/reviews/uncommitted/<run-id>.json`
-  (the `reviews/<scope>/` layout; the folder is created on demand until the
-  full `init` bootstrap in Story 1.8). Exit codes: `0` clean, `1`
-  error-severity findings, `2` degraded run or preflight failure (e.g. not a
-  git repo). Absent inputs (disposition ledger, corpus) are declared in the
-  manifest with sentinel hashes and typed degradation entries — never faked.
+  (the `reviews/<scope>/` layout; the folder is created on demand, or up
+  front by `guardrails init`). Exit codes: `0` clean, `1` error-severity
+  findings, `2` degraded run or preflight failure (e.g. not a git repo).
+  When the committed knowledge files exist (`conventions.yaml` /
+  `corpus-map.yaml`, seeded by `init`), the manifest carries the sha256 of
+  their bytes; absent inputs are declared with sentinel hashes and typed
+  degradation entries — never faked.
+
+### Bootstrap (`guardrails init`)
+
+`guardrails init` bootstraps `_agentic-guardrails/` in a git repo: a
+committed `config.yaml` (via a small per-axiom questionnaire on a TTY, whose
+options come from the contracts schema; `--no-input` or piped stdin writes
+the documented defaults — no prompt ever blocks), empty-but-valid
+`conventions.yaml` + `corpus-map.yaml` (contracts-validated; full ledger
+semantics arrive in Epic 4), git wiring (`.gitattributes` with
+`history/*.jsonl merge=union`, plus the seeded `.gitignore` covering
+`reviews/`, `.cache/`, and the generated schema file), and a regenerable
+file-level structural corpus seed (`{file, fanIn}` per import-graph node) at
+`.cache/corpus/structural-seed.json`. Init only writes MISSING files — a
+re-run never clobbers a human-edited file (each is reported `created:` or
+`kept:`; wiring files get missing lines appended with user content
+preserved). No tsconfig → the seed is skipped with a declared reason. Exit
+codes: `0` success, `2` typed failure (not a git repo, write error).
+Subsequent reviews verify the git wiring at preflight and warn loudly
+(naming the consequence) when a wiring line has been removed.
 
 ### Configuration (`_agentic-guardrails/config.yaml`)
 

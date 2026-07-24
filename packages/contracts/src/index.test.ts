@@ -9,6 +9,8 @@ import {
   computeFindingId,
   configJsonSchema,
   configSchema,
+  conventionsFileSchema,
+  corpusMapFileSchema,
   dispositionRecordSchema,
   findingSchema,
   migrateArtifact,
@@ -400,12 +402,39 @@ describe("trend and disposition records", () => {
   });
 });
 
+describe("ledger bootstrap schemas (1.8)", () => {
+  it("accepts the empty-but-valid shapes init writes", () => {
+    expect(
+      conventionsFileSchema.safeParse({ schemaVersion: 1, conventions: [] }).success,
+    ).toBe(true);
+    expect(
+      corpusMapFileSchema.safeParse({ schemaVersion: 1, humanConfirmed: [] }).success,
+    ).toBe(true);
+  });
+
+  it("rejects premature content, missing collections, and unknown keys (strict)", () => {
+    // Epic 4 defines entry shapes — until then ANY element is a parse failure.
+    expect(
+      conventionsFileSchema.safeParse({ schemaVersion: 1, conventions: [{ rule: "x" }] }).success,
+    ).toBe(false);
+    expect(
+      corpusMapFileSchema.safeParse({ schemaVersion: 1, humanConfirmed: ["src/a.ts"] }).success,
+    ).toBe(false);
+    expect(conventionsFileSchema.safeParse({ schemaVersion: 1 }).success).toBe(false);
+    expect(
+      conventionsFileSchema.safeParse({ schemaVersion: 1, conventions: [], extra: 1 }).success,
+    ).toBe(false);
+  });
+});
+
 describe("migrateArtifact", () => {
   it.each([
     ["run-manifest", "./__fixtures__/run-manifest.v1.json"],
     ["trend-record", "./__fixtures__/trend-record.v1.json"],
     ["disposition-record", "./__fixtures__/disposition-record.v1.json"],
     ["review-artifact", "./__fixtures__/review-artifact.v1.json"],
+    ["conventions", "./__fixtures__/conventions.v1.json"],
+    ["corpus-map", "./__fixtures__/corpus-map.v1.json"],
   ])("golden round-trip: committed v1 %s fixture migrates and parses green", (kind, path) => {
     const result = migrateArtifact(kind, readJson(path));
     expect(result.ok).toBe(true);
