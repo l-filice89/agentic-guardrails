@@ -151,7 +151,10 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewRunRes
         };
       }
     },
-    // ponytail: fixed concurrency bound of 4 until SPIKE-3 measures a real one.
+    // SPIKE-3 (docs/spikes/SPIKE-3-import-graph-cost.md): sweep {2,4,8} was
+    // flat — today's analyzers are synchronous CPU-bound, so the bound is
+    // provisional by construction; 4 kept as the cap for when 1.9 registers
+    // genuinely async analyzers. Revisit if analyzers move to workers.
     { concurrency: 4 },
   );
 

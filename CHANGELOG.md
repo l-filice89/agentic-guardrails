@@ -10,6 +10,16 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- SPIKE-3 — import-graph cost at scale (Story 1.5): committed benchmark
+  harness (`scripts/spike-3-benchmark.mjs` + seeded synthetic-repo generator
+  `scripts/spike-3-generate-repo.mjs`, run manually, repos generated to OS
+  temp, never committed) measuring 10k-file cold/warm graph builds with peak
+  RSS, a concurrency sweep {2,4,8} through a hand-rolled bounded async pool,
+  the real `runReview` on a 1k-file repo (<60s NFR-1 gate), and a full
+  bidirectional set-equality correctness check against the seeded
+  ground-truth edge set (missing + spurious both asserted zero). Results,
+  derived warm-rebuild budget, chosen p-map bound, and gate verdict recorded
+  in `docs/spikes/SPIKE-3-import-graph-cost.md`.
 - Walking skeleton — first end-to-end review (Story 1.4):
   `@agentic-guardrails/cli` ships the `guardrails review` command
   (uncommitted scope) driving the real static pipeline in core — phase 0
