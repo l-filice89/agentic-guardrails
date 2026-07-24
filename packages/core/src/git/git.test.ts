@@ -5,7 +5,15 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { headSha, isRepo, parsePorcelainZ, repoRoot, uncommittedFiles, EMPTY_TREE_SHA } from "./git.js";
+import {
+  fileGitStatus,
+  headSha,
+  isRepo,
+  parsePorcelainZ,
+  repoRoot,
+  uncommittedFiles,
+  EMPTY_TREE_SHA,
+} from "./git.js";
 
 const tempDirs: string[] = [];
 
@@ -83,6 +91,31 @@ describe("git wrapper inside a repo", () => {
     git(dir, ["commit", "-m", "base"]);
     expect(headSha(dir)).toMatch(/^[0-9a-f]{40}$/);
     expect(headSha(dir)).not.toBe(EMPTY_TREE_SHA);
+  });
+});
+
+describe("fileGitStatus", () => {
+  it("classifies committed, modified (staged or unstaged), and untracked", () => {
+    const dir = tempDir();
+    initRepo(dir);
+    writeFileSync(path.join(dir, "tracked.txt"), "v1\n");
+    git(dir, ["add", "."]);
+    git(dir, ["commit", "-m", "base"]);
+
+    expect(fileGitStatus(dir, "tracked.txt")).toEqual({ ok: true, value: "committed" });
+
+    writeFileSync(path.join(dir, "tracked.txt"), "v2\n"); // unstaged edit
+    expect(fileGitStatus(dir, "tracked.txt")).toEqual({ ok: true, value: "modified" });
+    git(dir, ["add", "tracked.txt"]); // staged edit is still "modified"
+    expect(fileGitStatus(dir, "tracked.txt")).toEqual({ ok: true, value: "modified" });
+
+    writeFileSync(path.join(dir, "new.txt"), "u\n");
+    expect(fileGitStatus(dir, "new.txt")).toEqual({ ok: true, value: "untracked" });
+  });
+
+  it("returns a typed error outside a repo, never throws", () => {
+    const result = fileGitStatus(tempDir(), "whatever.txt");
+    expect(result.ok).toBe(false);
   });
 });
 

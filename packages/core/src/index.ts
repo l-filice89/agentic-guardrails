@@ -14,6 +14,7 @@ export const CORE_CONTRACTS_LINK = CONTRACTS_PACKAGE;
 export * from "./adapter/language-adapter.js";
 export * from "./adapter/typescript-adapter.js";
 export * from "./analyzers/axiom1-structural.js";
+export * from "./config/config-loader.js";
 export * from "./git/git.js";
 export * from "./graph/import-graph.js";
 export * from "./persistence/artifact-writer.js";

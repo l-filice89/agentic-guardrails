@@ -48,13 +48,23 @@ export function writeReviewArtifact(options: WriteReviewArtifactOptions): string
   mkdirSync(dir, { recursive: true });
   ensureOutputGitignore(outRoot);
   const finalPath = path.join(dir, `${options.runId}.json`);
+  writeFileAtomic(finalPath, options.json);
+  return finalPath;
+}
+
+/**
+ * Visibility-atomic file write (temp file in the target directory → fsync →
+ * rename). The parent directory must exist. Shared by the review-artifact
+ * writer and the config-plane schema writer.
+ */
+export function writeFileAtomic(finalPath: string, content: string): void {
   // Unique temp name (pid + random suffix) so two concurrent runs can never
   // interleave writes into the same temp file. Randomness lives in the TEMP
-  // name only — the final path and artifact bytes stay deterministic.
+  // name only — the final path and file bytes stay deterministic.
   const tmpPath = `${finalPath}.${process.pid}.${randomBytes(2).toString("hex")}.tmp`;
   const fd = openSync(tmpPath, "w");
   try {
-    writeSync(fd, options.json);
+    writeSync(fd, content);
     fsyncSync(fd);
   } finally {
     closeSync(fd);
@@ -63,7 +73,7 @@ export function writeReviewArtifact(options: WriteReviewArtifactOptions): string
   // Best-effort directory fsync so the rename itself reaches disk. Windows
   // cannot open directories for fsync — visibility-atomicity holds anyway.
   try {
-    const dirFd = openSync(dir, "r");
+    const dirFd = openSync(path.dirname(finalPath), "r");
     try {
       fsyncSync(dirFd);
     } finally {
@@ -73,7 +83,6 @@ export function writeReviewArtifact(options: WriteReviewArtifactOptions): string
     // Unsupported platform (e.g. Windows EISDIR/EPERM): durability is
     // best-effort by design; ignore.
   }
-  return finalPath;
 }
 
 /**
@@ -85,5 +94,5 @@ export function writeReviewArtifact(options: WriteReviewArtifactOptions): string
 function ensureOutputGitignore(outRoot: string): void {
   const gitignorePath = path.join(outRoot, ".gitignore");
   if (existsSync(gitignorePath)) return;
-  writeFileSync(gitignorePath, "reviews/\n.cache/\n");
+  writeFileSync(gitignorePath, "reviews/\n.cache/\nconfig.schema.json\n");
 }

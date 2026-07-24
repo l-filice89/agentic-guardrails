@@ -1,8 +1,9 @@
 /**
  * `guardrails review` — uncommitted scope (the only scope until 1.15).
- * Exit codes: 0 clean · 1 error-severity findings · 2 degraded run or
- * preflight/persistence failure (degradation dominates: a run that silently
- * lost coverage must never look merely "failed lint").
+ * Exit codes: 0 clean · 1 pipeline gate failed (blocking axiom over its
+ * error-finding threshold — config plane, 1.6) · 2 degraded run or
+ * preflight/config/persistence failure (degradation dominates: a run that
+ * silently lost coverage must never look merely "failed lint").
  */
 import path from "node:path";
 
@@ -27,6 +28,28 @@ export async function reviewCommand(cwd: string): Promise<number> {
       return 2;
     }
 
+    // Run-start config transparency (FR-31): every deviation from defaults
+    // is one explicit stderr line; absence of a config file is declared too.
+    if (!result.configPresent) {
+      process.stderr.write("guardrails review: config: using defaults (no config file)\n");
+    }
+    for (const deviation of result.deviations) {
+      process.stderr.write(`guardrails review: config: ${deviation}\n`);
+    }
+    // Non-fatal config-plane warnings (schema-file write failure, unknown
+    // axiom ids) — visible, never a run degradation.
+    for (const warning of result.configWarnings) {
+      process.stderr.write(`guardrails review: config: ${warning}\n`);
+    }
+    // An uncommitted config governs gating — worth one visible line (policy
+    // beyond visibility is deferred).
+    const configGitStatus = result.artifact.manifest.configGitStatus;
+    if (configGitStatus === "modified" || configGitStatus === "untracked") {
+      process.stderr.write(
+        `guardrails review: config: config.yaml is ${configGitStatus} — an uncommitted config governs gating\n`,
+      );
+    }
+
     const artifactPath = writeReviewArtifact({
       repoRoot: result.repoRoot,
       scope: result.artifact.scope,
@@ -45,7 +68,9 @@ export async function reviewCommand(cwd: string): Promise<number> {
       }
       return 2;
     }
-    return result.artifact.findings.some((f) => f.severity === "error") ? 1 : 0;
+    // Exit 1 is the pipeline's gate verdict (enforcement + maxFindings), not
+    // a raw any-error-finding rule — advisory findings never flip the code.
+    return result.gate.pass ? 0 : 1;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     process.stderr.write(`guardrails review: ${message}\n`);

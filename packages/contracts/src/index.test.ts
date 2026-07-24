@@ -14,6 +14,7 @@ import {
   migrateArtifact,
   partialResult,
   registerArtifactKind,
+  reviewArtifactSchema,
   runManifestSchema,
   trendRecordSchema,
 } from "./index.js";
@@ -217,6 +218,61 @@ describe("runManifestSchema", () => {
   });
 });
 
+describe("runManifestSchema config-plane fields", () => {
+  it("accepts optional configHash/configPresent/enforcement/configGitStatus, absent fields still parse", () => {
+    const manifest = readJson("./__fixtures__/run-manifest.v1.json") as Record<string, unknown>;
+    expect(runManifestSchema.safeParse(manifest).success).toBe(true); // fields absent = fine
+    expect(
+      runManifestSchema.safeParse({
+        ...manifest,
+        configHash: "absent",
+        configPresent: false,
+        enforcement: { "1": { enforcement: "advisory" }, "5": { enforcement: "blocking", maxFindings: 2 } },
+        configGitStatus: "untracked",
+      }).success,
+    ).toBe(true);
+  });
+
+  it("rejects invalid enforcement entries and unknown configGitStatus values", () => {
+    const manifest = readJson("./__fixtures__/run-manifest.v1.json") as Record<string, unknown>;
+    expect(
+      runManifestSchema.safeParse({
+        ...manifest,
+        enforcement: { "1": { enforcement: "warn" } },
+      }).success,
+    ).toBe(false);
+    expect(
+      runManifestSchema.safeParse({ ...manifest, configGitStatus: "dirty" }).success,
+    ).toBe(false);
+  });
+});
+
+describe("reviewArtifactSchema gate", () => {
+  it("accepts an optional strict gate verdict; the golden fixture without it still parses", () => {
+    const artifact = readJson("./__fixtures__/review-artifact.v1.json") as Record<string, unknown>;
+    expect(reviewArtifactSchema.safeParse(artifact).success).toBe(true); // gate absent = fine
+    const gate = {
+      pass: true,
+      perAxiom: [
+        { axiom: "1", enforcement: "advisory", errorFindings: 1, maxFindings: 0, pass: true },
+      ],
+    };
+    expect(reviewArtifactSchema.safeParse({ ...artifact, gate }).success).toBe(true);
+    expect(
+      reviewArtifactSchema.safeParse({ ...artifact, gate: { ...gate, extra: 1 } }).success,
+    ).toBe(false);
+  });
+});
+
+describe("runManifestSchema axiomsOff", () => {
+  it("accepts an optional axiomsOff list and still parses fixtures without it", () => {
+    const manifest = readJson("./__fixtures__/run-manifest.v1.json") as Record<string, unknown>;
+    expect(runManifestSchema.safeParse(manifest).success).toBe(true); // field absent = fine
+    expect(runManifestSchema.safeParse({ ...manifest, axiomsOff: ["1"] }).success).toBe(true);
+    expect(runManifestSchema.safeParse({ ...manifest, axiomsOff: [""] }).success).toBe(false);
+  });
+});
+
 describe("configSchema", () => {
   it("defaults axiom 5 to blocking", () => {
     const parsed = configSchema.safeParse({});
@@ -229,6 +285,45 @@ describe("configSchema", () => {
       configSchema.safeParse({ axioms: { "5": { enforcement: "warn" } } }).success,
     ).toBe(false);
     expect(configJsonSchema).toMatchObject({ type: "object" });
+  });
+
+  it("accepts an optional maxFindings threshold (int >= 0)", () => {
+    const parsed = configSchema.safeParse({
+      axioms: { "1": { enforcement: "blocking", maxFindings: 5 } },
+    });
+    expect(parsed.success).toBe(true);
+    expect(parsed.data?.axioms["1"]?.maxFindings).toBe(5);
+  });
+
+  it("rejects maxFindings on a non-blocking axiom, naming the path", () => {
+    for (const enforcement of ["advisory", "off"]) {
+      const result = configSchema.safeParse({
+        axioms: { "1": { enforcement, maxFindings: 2 } },
+      });
+      expect(result.success).toBe(false);
+      expect(result.error?.issues.some((i) => i.path.includes("maxFindings"))).toBe(true);
+    }
+    // maxFindings on a blocking axiom stays valid.
+    expect(
+      configSchema.safeParse({ axioms: { "1": { enforcement: "blocking", maxFindings: 2 } } })
+        .success,
+    ).toBe(true);
+  });
+
+  it("rejects negative or non-integer maxFindings", () => {
+    for (const bad of [-1, 1.5, "3"]) {
+      expect(
+        configSchema.safeParse({
+          axioms: { "1": { enforcement: "blocking", maxFindings: bad } },
+        }).success,
+      ).toBe(false);
+    }
+  });
+
+  it("rejects a typo top-level key (strict), naming the key", () => {
+    const result = configSchema.safeParse({ axiom: { "1": { enforcement: "off" } } });
+    expect(result.success).toBe(false);
+    expect(JSON.stringify(result.error?.issues)).toContain("axiom");
   });
 });
 

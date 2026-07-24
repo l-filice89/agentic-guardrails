@@ -8,12 +8,39 @@ export const enforcementSchema = z.enum(["blocking", "advisory", "off"]);
  * id; axiom #5 (type-system integrity) defaults to `blocking`, everything
  * else defaults to nothing until the consumer's config file sets it.
  */
+const axiomEntrySchema = z
+  .strictObject({
+    enforcement: enforcementSchema,
+    maxFindings: z
+      .int()
+      .min(0)
+      .optional()
+      .describe(
+        "Error-finding tolerance for a blocking axiom: exit gating fails only when error findings exceed this count (default 0). Ignored for advisory/off.",
+      ),
+  })
+  // maxFindings only means something for a blocking axiom — a threshold on an
+  // advisory/off axiom is a config mistake, rejected with the path named.
+  .refine((entry) => entry.enforcement === "blocking" || entry.maxFindings === undefined, {
+    message: 'maxFindings is only valid with enforcement "blocking"',
+    path: ["maxFindings"],
+  });
+
+export type AxiomEntry = z.infer<typeof axiomEntrySchema>;
+
 export const configSchema = z.strictObject({
   axioms: z
-    .record(z.string(), z.strictObject({ enforcement: enforcementSchema }))
+    .record(z.string(), axiomEntrySchema)
     .default({})
-    // Axiom #5 defaults to blocking; an explicit entry for "5" wins.
-    .transform((axioms) => ({ "5": { enforcement: "blocking" as const }, ...axioms }))
+    // Axiom #5 defaults to blocking; an explicit entry for "5" wins. The
+    // return type is annotated so the inferred Config keeps its index
+    // signature (the literal spread would otherwise narrow it to `{"5":...}`).
+    .transform(
+      (axioms): Record<string, AxiomEntry> => ({
+        "5": { enforcement: "blocking" as const },
+        ...axioms,
+      }),
+    )
     // Surfaced via .describe so the generated JSON Schema (io: "input")
     // carries the default that the transform makes invisible to it.
     .describe(

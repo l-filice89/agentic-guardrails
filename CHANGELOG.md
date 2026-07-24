@@ -10,6 +10,26 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Config plane (Story 1.6): `guardrails review` loads
+  `_agentic-guardrails/config.yaml` through the contracts `configSchema`
+  (single source of truth; core parses YAML via the `yaml` package and
+  `safeParse`s — no component reads config outside the validated object).
+  Per-axiom enforcement (`blocking | advisory | off`, axiom #5 defaulting to
+  `blocking`) plus an optional `maxFindings` threshold now drive exit-code
+  gating: a blocking axiom fails the gate only when its error-severity
+  findings exceed `maxFindings` (default 0); advisory findings never affect
+  the exit code (still reported + persisted); `off` axioms are excluded from
+  the run at analyzer-membership level and declared in the manifest's new
+  optional `axiomsOff` field. Invalid configs are typed errors naming the
+  offending path (Zod) or line/column (YAML) — exit 2, never a stack trace,
+  never a silent fallback. Every deviation from defaults is logged at run
+  start (one stderr line per value: path, configured, default); a missing
+  config file is declared as "using defaults (no config file)". The
+  generated JSON Schema is kept current at
+  `_agentic-guardrails/config.schema.json` (atomic write; write failure
+  degrades, never aborts) for `# yaml-language-server` editor autocomplete,
+  and the config content hash joins the runId inputs (config changes
+  identity).
 - SPIKE-3 — import-graph cost at scale (Story 1.5): committed benchmark
   harness (`scripts/spike-3-benchmark.mjs` + seeded synthetic-repo generator
   `scripts/spike-3-generate-repo.mjs`, run manually, repos generated to OS

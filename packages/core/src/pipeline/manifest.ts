@@ -22,13 +22,29 @@ export const RULESET_VERSION = "1";
 /** sha256 of the empty string — the sentinel for "this input does not exist yet". */
 export const ABSENT_SHA256 = createHash("sha256").update("").digest("hex");
 
+/** Numeric-aware string compare ("2" < "10") for axiom-id ordering. */
+export function numericCompare(a: string, b: string): number {
+  return a.localeCompare(b, "en", { numeric: true });
+}
+
 export interface BuiltManifest {
   manifest: RunManifest;
   /** The typed declarations of what the sentinel hashes stand for. */
   degraded: Degradation[];
 }
 
-export function buildRunManifest(): BuiltManifest {
+export interface BuildRunManifestOptions {
+  axiomsOff?: readonly string[];
+  /** sha256 hex of config.yaml bytes; literal "absent" when no file. */
+  configHash?: string;
+  configPresent?: boolean;
+  /** Effective post-default enforcement config, keyed by axiom id. */
+  enforcement?: RunManifest["enforcement"];
+  configGitStatus?: RunManifest["configGitStatus"];
+}
+
+export function buildRunManifest(options: BuildRunManifestOptions = {}): BuiltManifest {
+  const axiomsOff = options.axiomsOff ?? [];
   // Keys in fixed order — the manifest is embedded in the byte-stable artifact.
   const manifest: RunManifest = {
     schemaVersion: 1,
@@ -37,6 +53,15 @@ export function buildRunManifest(): BuiltManifest {
     rulesetVersion: RULESET_VERSION,
     tierEnablement: { deterministic: true, llm: false },
     engineVersion: ENGINE_VERSION,
+    ...(options.configHash === undefined ? {} : { configHash: options.configHash }),
+    ...(options.configPresent === undefined ? {} : { configPresent: options.configPresent }),
+    ...(options.enforcement === undefined ? {} : { enforcement: options.enforcement }),
+    ...(options.configGitStatus === undefined
+      ? {}
+      : { configGitStatus: options.configGitStatus }),
+    // Off-by-config axioms are declared (not degradation — the user chose it);
+    // omitted entirely when none, keeping pre-1.6 artifact bytes unchanged.
+    ...(axiomsOff.length > 0 ? { axiomsOff: [...axiomsOff].sort(numericCompare) } : {}),
   };
   return {
     manifest,

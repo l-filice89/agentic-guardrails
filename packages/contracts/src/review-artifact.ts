@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { enforcementSchema } from "./config.js";
 import { findingSchema } from "./finding.js";
 import { degradationSchema } from "./partial-result.js";
 import { runManifestSchema } from "./run-manifest.js";
@@ -22,6 +23,23 @@ export const reviewArtifactSchema = z.strictObject({
   findings: z.array(findingSchema),
   degraded: z.array(degradationSchema),
   manifest: runManifestSchema,
+  /** The gate verdict this run's exit code was derived from — one entry per
+   * axiom that ran or was configured (off axioms live in manifest.axiomsOff).
+   * Optional so pre-1.6 artifacts still parse. */
+  gate: z
+    .strictObject({
+      pass: z.boolean(),
+      perAxiom: z.array(
+        z.strictObject({
+          axiom: z.string().min(1),
+          enforcement: enforcementSchema,
+          errorFindings: z.int().min(0),
+          maxFindings: z.int().min(0),
+          pass: z.boolean(),
+        }),
+      ),
+    })
+    .optional(),
 });
 
 export type ReviewArtifact = z.infer<typeof reviewArtifactSchema>;

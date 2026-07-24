@@ -1,7 +1,8 @@
 /**
  * @agentic-guardrails/cli — the `guardrails` command surface. Depends on
- * core + contracts only (boundary-checked); no LLM SDKs, no config plane
- * (1.6), no cache (1.7).
+ * core + contracts only (boundary-checked); no LLM SDKs, no cache (1.7).
+ * Config plane (1.6): the pipeline loads `_agentic-guardrails/config.yaml`;
+ * this layer only surfaces deviations and honors the gate verdict.
  *
  * Exit-code contract: 0 clean (and `--version`/`--help`) · 1 error-severity
  * findings · 2 everything unexpected — usage errors, unknown subcommands, a

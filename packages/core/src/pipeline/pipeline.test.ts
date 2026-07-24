@@ -56,6 +56,10 @@ const okAnalyzer: Analyzer = {
   axiom: "1",
   run: async () => ({ findings: [fakeFinding("change.ts")], degraded: [] }),
 };
+const cleanAnalyzer: Analyzer = {
+  axiom: "1",
+  run: async () => ({ findings: [], degraded: [] }),
+};
 const crashingAnalyzer: Analyzer = {
   axiom: "99",
   run: async () => {
@@ -156,6 +160,135 @@ describe("runReview change-set handling (phase 0)", () => {
     const result = await runReview({ cwd, analyzers: [spyAnalyzer] });
     expect(result.ok).toBe(true);
     expect(seen[0]).toEqual(["change.ts", "mod.mts"]);
+  });
+});
+
+function writeConfig(cwd: string, yamlText: string): void {
+  mkdirSync(path.join(cwd, "_agentic-guardrails"), { recursive: true });
+  writeFileSync(path.join(cwd, "_agentic-guardrails", "config.yaml"), yamlText);
+}
+
+describe("runReview config plane (1.6)", () => {
+  it("excludes an off-by-config axiom from the run and declares it in the manifest", async () => {
+    const cwd = tempRepoWithChange();
+    writeConfig(cwd, "axioms:\n  '1':\n    enforcement: 'off'\n");
+    let ran = false;
+    const spy: Analyzer = {
+      axiom: "1",
+      run: async () => {
+        ran = true;
+        return { findings: [fakeFinding("change.ts")], degraded: [] };
+      },
+    };
+    const result = await runReview({ cwd, analyzers: [spy] });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(ran).toBe(false); // membership exclusion, not result suppression
+    expect(result.artifact.findings).toEqual([]);
+    expect(result.artifact.manifest.axiomsOff).toEqual(["1"]);
+    expect(result.degradedRun).toBe(false); // off-by-config is not degradation
+  });
+
+  it("HAZARD: an advisory axiom with error findings passes the gate", async () => {
+    const cwd = tempRepoWithChange();
+    writeConfig(cwd, "axioms:\n  '1':\n    enforcement: advisory\n");
+    const result = await runReview({ cwd, analyzers: [okAnalyzer] });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.artifact.findings).toHaveLength(1); // still reported + persisted
+    expect(result.gate.pass).toBe(true);
+    expect(result.deviations).toEqual(['axioms.1.enforcement = "advisory" (default: "blocking")']);
+    // P2: the bypass is durably declared in the artifact — enforcement map +
+    // gate verdict with the error count.
+    expect(result.artifact.manifest.enforcement).toEqual({
+      "1": { enforcement: "advisory" },
+      "5": { enforcement: "blocking" },
+    });
+    expect(result.artifact.gate).toEqual({
+      pass: true,
+      perAxiom: [
+        { axiom: "1", enforcement: "advisory", errorFindings: 1, maxFindings: 0, pass: true },
+        { axiom: "5", enforcement: "blocking", errorFindings: 0, maxFindings: 0, pass: true },
+      ],
+    });
+  });
+
+  it("persists configHash/configPresent/configGitStatus in the manifest (untracked config)", async () => {
+    const cwd = tempRepoWithChange();
+    writeConfig(cwd, "axioms:\n  '1':\n    enforcement: advisory\n");
+    const result = await runReview({ cwd, analyzers: [okAnalyzer] });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.artifact.manifest.configPresent).toBe(true);
+    expect(result.artifact.manifest.configHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(result.artifact.manifest.configGitStatus).toBe("untracked");
+  });
+
+  it("declares configGitStatus 'absent' and configHash 'absent' with no config file", async () => {
+    const cwd = tempRepoWithChange();
+    const result = await runReview({ cwd, analyzers: [okAnalyzer] });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.artifact.manifest.configPresent).toBe(false);
+    expect(result.artifact.manifest.configHash).toBe("absent");
+    expect(result.artifact.manifest.configGitStatus).toBe("absent");
+  });
+
+  it("warns (never degrades) about config entries matching no known axiom", async () => {
+    const cwd = tempRepoWithChange();
+    writeConfig(cwd, "axioms:\n  '7':\n    enforcement: advisory\n");
+    const result = await runReview({ cwd, analyzers: [okAnalyzer] });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.configWarnings).toEqual(["axioms.7 matches no known axiom"]);
+    expect(result.degradedRun).toBe(false);
+  });
+
+  it("a schema-file write failure is a warning, NOT a degradation (run stays clean)", async () => {
+    const cwd = tempRepoWithChange();
+    writeConfig(cwd, "axioms: {}\n");
+    // A DIRECTORY at the schema path forces the write to fail.
+    mkdirSync(path.join(cwd, "_agentic-guardrails", "config.schema.json"), { recursive: true });
+    const result = await runReview({ cwd, analyzers: [cleanAnalyzer] });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.degradedRun).toBe(false); // no analysis coverage lost
+    expect(result.configWarnings.some((w) => w.includes("config.schema.json write failed"))).toBe(
+      true,
+    );
+    expect(result.gate.pass).toBe(true);
+  });
+
+  it("fails the gate by default when a blocking axiom has error findings", async () => {
+    const cwd = tempRepoWithChange();
+    const result = await runReview({ cwd, analyzers: [okAnalyzer] });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.configPresent).toBe(false);
+    expect(result.gate.pass).toBe(false);
+    expect(result.artifact.manifest.axiomsOff).toBeUndefined();
+  });
+
+  it("returns a typed config failure (not a throw) for an invalid config", async () => {
+    const cwd = tempRepoWithChange();
+    writeConfig(cwd, "axioms:\n  '1':\n    enforcement: warn\n");
+    const result = await runReview({ cwd, analyzers: [okAnalyzer] });
+    expect(result).toMatchObject({ ok: false, code: "config" });
+    if (result.ok) return;
+    expect(result.message).toContain("axioms.1.enforcement");
+  });
+
+  it("HAZARD: config content participates in the runId", async () => {
+    const cwd = tempRepoWithChange();
+    const noConfig = await runReview({ cwd, analyzers: [okAnalyzer] });
+    writeConfig(cwd, "axioms:\n  '1':\n    enforcement: advisory\n");
+    const withConfig = await runReview({ cwd, analyzers: [okAnalyzer] });
+    writeConfig(cwd, "axioms:\n  '1':\n    enforcement: blocking\n");
+    const changedConfig = await runReview({ cwd, analyzers: [okAnalyzer] });
+    expect(noConfig.ok && withConfig.ok && changedConfig.ok).toBe(true);
+    if (!noConfig.ok || !withConfig.ok || !changedConfig.ok) return;
+    const ids = [noConfig, withConfig, changedConfig].map((r) => r.artifact.runId);
+    expect(new Set(ids).size).toBe(3); // all distinct
   });
 });
 

@@ -107,3 +107,24 @@ export function uncommittedFiles(cwd: string): GitResult<string[]> {
   if (!result.ok) return { ok: false, reason: result.reason };
   return { ok: true, value: parsePorcelainZ(result.value) };
 }
+
+export type FileGitStatus = "committed" | "modified" | "untracked";
+
+/**
+ * Git status of ONE existing file: `committed` (clean), `modified` (any
+ * staged/unstaged change to a tracked file), or `untracked`. The caller
+ * handles absence — a file that does not exist has no git status.
+ */
+export function fileGitStatus(cwd: string, relPath: string): GitResult<FileGitStatus> {
+  const result = git(cwd, [
+    "status",
+    "--porcelain=v1",
+    "-z",
+    "--untracked-files=all",
+    "--",
+    relPath,
+  ]);
+  if (!result.ok) return { ok: false, reason: result.reason };
+  if (parsePorcelainZ(result.value).length === 0) return { ok: true, value: "committed" };
+  return { ok: true, value: result.value.startsWith("??") ? "untracked" : "modified" };
+}

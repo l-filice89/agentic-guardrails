@@ -79,6 +79,7 @@ describe("writeReviewArtifact", () => {
     const content = readFileSync(gitignorePath, "utf8");
     expect(content).toContain("reviews/");
     expect(content).toContain(".cache/");
+    expect(content).toContain("config.schema.json");
 
     // An existing .gitignore is user territory — never clobbered.
     writeFileSync(gitignorePath, "# custom\n");

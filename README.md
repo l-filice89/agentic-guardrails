@@ -174,6 +174,30 @@ The v2 runtime lives in a pnpm-workspaces monorepo under `packages/`:
   git repo). Absent inputs (disposition ledger, corpus) are declared in the
   manifest with sentinel hashes and typed degradation entries — never faked.
 
+### Configuration (`_agentic-guardrails/config.yaml`)
+
+`guardrails review` reads an optional, git-trackable YAML config validated
+through the contracts schema. Missing file → defaults (declared on stderr as
+"using defaults"); every value deviating from defaults is logged explicitly
+at run start; invalid values are typed errors naming the offending path,
+exit 2. The tool keeps a generated `config.schema.json` beside the YAML —
+reference it for editor autocomplete:
+
+```yaml
+# yaml-language-server: $schema=./config.schema.json
+axioms:
+  "1":
+    enforcement: advisory   # blocking | advisory | off (axiom "5" defaults to blocking)
+  "5":
+    enforcement: blocking
+    maxFindings: 2          # tolerate up to N error findings before exit 1 (default 0)
+```
+
+Enforcement semantics: `blocking` error findings above `maxFindings` exit 1;
+`advisory` findings are reported and persisted but never affect the exit
+code; `off` axioms do not run (declared in the run manifest's `axiomsOff`).
+Config content participates in the run identity hash.
+
 More packages (`llm`, `action`, `plugin`) land as later stories need
 them. See `docs/adr/` for architecture decision records and `roadmap.md` for
 the milestone sequencing.

@@ -26,13 +26,15 @@ import {
   type Degradation,
   type Finding,
   type ReviewArtifact,
+  type RunManifest,
 } from "@agentic-guardrails/contracts";
 import pMap from "p-map";
 import { ts } from "ts-morph";
 
 import { axiom1Structural } from "../analyzers/axiom1-structural.js";
-import { headSha, repoRoot, uncommittedFiles } from "../git/git.js";
-import { buildRunManifest, ENGINE_VERSION, RULESET_VERSION } from "./manifest.js";
+import { evaluateGate, loadConfig, type GateResult } from "../config/config-loader.js";
+import { fileGitStatus, headSha, repoRoot, uncommittedFiles } from "../git/git.js";
+import { buildRunManifest, ENGINE_VERSION, numericCompare, RULESET_VERSION } from "./manifest.js";
 
 export type { ReviewArtifact } from "@agentic-guardrails/contracts";
 
@@ -63,7 +65,7 @@ export interface Analyzer {
 export const DEFAULT_ANALYZERS: readonly Analyzer[] = [axiom1Structural];
 
 export type ReviewRunResult =
-  | { ok: false; code: "preflight" | "invalid-artifact"; message: string }
+  | { ok: false; code: "preflight" | "config" | "invalid-artifact"; message: string }
   | {
       ok: true;
       repoRoot: string;
@@ -75,6 +77,15 @@ export type ReviewRunResult =
        * baseline pre-1.8 state does not flag every run as degraded. */
       runDegraded: Degradation[];
       degradedRun: boolean;
+      /** Exit-code gate over findings + config (blocking/advisory/off + maxFindings). */
+      gate: GateResult;
+      /** false → no config.yaml, defaults applied. */
+      configPresent: boolean;
+      /** Formatted config deviations from defaults, for CLI run-start logging. */
+      deviations: string[];
+      /** Non-fatal config-plane warnings (schema-file write failure, config
+       * entries matching no known axiom) — stderr lines, never exit-code 2. */
+      configWarnings: string[];
     };
 
 export interface RunReviewOptions {
@@ -97,6 +108,12 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewRunRes
   }
   const changed = uncommittedFiles(options.cwd);
   if (!changed.ok) return { ok: false, code: "preflight", message: changed.reason };
+
+  // Config plane (1.6): the ONLY config read in the pipeline. An invalid
+  // config is a typed failure (exit 2 at the CLI) — never a silent fallback.
+  const loaded = loadConfig(root.value);
+  if (!loaded.ok) return { ok: false, code: "config", message: loaded.message };
+  const config = loaded.config;
 
   // The engine's own output directory is never part of the reviewed change
   // set (a written artifact must not change the next run's identity).
@@ -136,7 +153,13 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewRunRes
   };
 
   // ---- Phase 1: deterministic tier (per-axiom isolation) ------------------
-  const analyzers = options.analyzers ?? DEFAULT_ANALYZERS;
+  // `off` exclusion is membership-level (the analyzer never runs), so the
+  // manifest can honestly declare "did not run" — not result suppression.
+  const registered = options.analyzers ?? DEFAULT_ANALYZERS;
+  const analyzers = registered.filter((a) => config.axioms[a.axiom]?.enforcement !== "off");
+  const axiomsOff = registered
+    .filter((a) => config.axioms[a.axiom]?.enforcement === "off")
+    .map((a) => a.axiom);
   const results = await pMap(
     analyzers,
     async (analyzer): Promise<AnalyzerResult> => {
@@ -170,16 +193,69 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewRunRes
   runDegraded.sort((a, b) => compare(a.subject, b.subject) || compare(a.reason, b.reason));
 
   // ---- Phase 5: composition -----------------------------------------------
-  const { manifest, degraded: sentinelDegraded } = buildRunManifest();
+  // Config-plane visibility: warnings (never degradations, never exit 2).
+  const knownAxioms = new Set([...registered.map((a) => a.axiom), "5"]);
+  const configWarnings = [
+    ...loaded.warnings,
+    ...Object.keys(config.axioms)
+      .filter((id) => !knownAxioms.has(id))
+      .sort(numericCompare)
+      .map((id) => `axioms.${id} matches no known axiom`),
+  ];
+
+  // Governing-config git status: an uncommitted config gating the run is
+  // declared in the manifest and warned about at the CLI (P3 — visibility
+  // only, no policy). Absent = no file, so no git call needed.
+  let configGitStatus: RunManifest["configGitStatus"];
+  if (loaded.configPresent) {
+    const status = fileGitStatus(root.value, "_agentic-guardrails/config.yaml");
+    // ponytail: a git failure here is near-impossible (repoRoot + status just
+    // succeeded); the field is optional, so it is simply omitted on failure.
+    if (status.ok) configGitStatus = status.value;
+  } else {
+    configGitStatus = "absent";
+  }
+
+  // The effective post-default enforcement map the gate uses — persisted in
+  // the manifest so the governing policy is durable, keys numeric-sorted.
+  const enforcement = Object.fromEntries(
+    Object.keys(config.axioms)
+      .sort(numericCompare)
+      .map((id) => {
+        const entry = config.axioms[id]!;
+        return [
+          id,
+          {
+            enforcement: entry.enforcement,
+            ...(entry.maxFindings === undefined ? {} : { maxFindings: entry.maxFindings }),
+          },
+        ];
+      }),
+  );
+
+  const gate = evaluateGate(
+    findings,
+    config,
+    analyzers.map((a) => a.axiom),
+  );
+
+  const { manifest, degraded: sentinelDegraded } = buildRunManifest({
+    axiomsOff,
+    configHash: loaded.configHash,
+    configPresent: loaded.configPresent,
+    enforcement,
+    configGitStatus,
+  });
   const artifact: ReviewArtifact = {
     schemaVersion: 1,
-    runId: computeRunId(root.value, fileHashes, deletedFiles),
+    runId: computeRunId(root.value, fileHashes, deletedFiles, loaded.configHash),
     scope: "uncommitted",
     changedFiles,
     deletedFiles,
     findings,
     degraded: [...sentinelDegraded, ...runDegraded],
     manifest,
+    gate,
   };
   // Never persist an invalid envelope: validation failure is the exit-2 path.
   const parsed = reviewArtifactSchema.safeParse(artifact);
@@ -198,6 +274,10 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewRunRes
     artifactJson: `${JSON.stringify(artifact, null, 2)}\n`,
     runDegraded,
     degradedRun: runDegraded.length > 0,
+    gate,
+    configPresent: loaded.configPresent,
+    deviations: loaded.deviations,
+    configWarnings,
   };
 }
 
@@ -277,13 +357,15 @@ function discoverTsconfigs(root: string): TsconfigDiscovery {
  * Run identity = sha256 over (scope, HEAD sha — empty-tree sentinel before
  * the first commit — sorted changed paths + their content hashes as snapped
  * before phase 1, deleted uncommitted paths, root tsconfig content hash,
- * ruleset version, engine version), truncated to 16 hex chars. No wall
- * clock — identical input re-runs overwrite the same artifact file.
+ * config.yaml content hash — literal "absent" sentinel when absent — ruleset
+ * version, engine version), truncated to 16 hex chars. No wall clock —
+ * identical input re-runs overwrite the same artifact file.
  */
 function computeRunId(
   root: string,
   fileHashes: readonly (readonly [string, string])[],
   deletedFiles: readonly string[],
+  configHash: string,
 ): string {
   let tsconfigHash: string;
   try {
@@ -301,6 +383,7 @@ function computeRunId(
         fileHashes,
         deletedFiles,
         tsconfigHash,
+        configHash,
         RULESET_VERSION,
         ENGINE_VERSION,
       ]),
