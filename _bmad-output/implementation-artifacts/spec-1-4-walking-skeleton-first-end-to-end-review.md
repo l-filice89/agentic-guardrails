@@ -4,6 +4,7 @@ type: 'feature'
 created: '2026-07-24'
 status: 'done'
 baseline_revision: 1d1b9d7389020033922e33cfb9097abf56c83f89
+final_revision: 422768f7137c37b47a0bd2a2ca90917f93f774e9
 review_loop_iteration: 0
 followup_review_recommended: true # OVERSIZED-STORY RULE: oversized accepted (epic-mandated walking skeleton spans cli+pipeline+analyzer+persistence by design — that is its purpose); elevated review posture from the start
 context: []
