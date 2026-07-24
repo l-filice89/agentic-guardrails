@@ -4,6 +4,7 @@ type: 'feature'
 created: '2026-07-24'
 status: 'done'
 baseline_revision: 63571cb020e509eb5434e2f9deda049c0300fe6f
+final_revision: 67324540d858a6281b1b4f754946995bf8e0a5db
 review_loop_iteration: 0
 followup_review_recommended: true # AUTO-FORCED: five HIGH inline findings (cache poisoning; post-abort cache leak; nondeterministic merge order; silent cache-disable; unobservable budget signal)
 context: []
