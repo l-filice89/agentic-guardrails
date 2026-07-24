@@ -149,7 +149,17 @@ The v2 runtime lives in a pnpm-workspaces monorepo under `packages/`:
   never throw on bad input.
 - `packages/core` (`@agentic-guardrails/core`) — the deterministic,
   **LLM-free** analysis engine. This boundary is lint-enforced, not just
-  documented (see `docs/adr/ADR-005-contracts-package.md`).
+  documented (see `docs/adr/ADR-005-contracts-package.md`). Ships the
+  `LanguageAdapter` seam with a ts-morph-backed `TypeScriptAdapter`
+  (`docs/adr/ADR-004-ast-tooling.md`) that builds a deterministic import
+  graph — compiler-accurate resolution of `paths` aliases, barrels,
+  re-exports, and type-only imports; dynamic imports and `require` calls
+  are discovered by AST walking, with literal specifiers resolved via the
+  compiler and non-literal ones surfacing as typed degradations — with
+  byte-stable serialization and `fanIn`/`fanOut` queries. Unresolvable
+  imports, unresolved bare specifiers (recorded as external but flagged
+  unverified), and tsconfig load failures all surface as typed degradations
+  via the partial-result contract, never throws.
 
 More packages (`llm`, `cli`, `action`, `plugin`) land as later stories need
 them. See `docs/adr/` for architecture decision records and `roadmap.md` for

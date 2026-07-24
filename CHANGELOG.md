@@ -10,6 +10,19 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- TypeScript LanguageAdapter + import graph (Story 1.3):
+  `@agentic-guardrails/core` ships the `LanguageAdapter` seam and its
+  ts-morph-backed `TypeScriptAdapter`, building a deterministic import graph
+  (tsconfig `paths` aliases, barrels/re-exports, type-only imports —
+  declaration-level and inline modifiers — external packages, plus
+  AST-discovered dynamic imports, `import x = require(...)`, and `require`
+  calls: literal specifiers resolve via the compiler, non-literal ones
+  degrade) returned through the contracts partial-result shape —
+  unresolvable imports, unresolved bare specifiers (kept as external nodes
+  but flagged unverified), and tsconfig load failures degrade, never throw. `ImportGraph` offers
+  byte-stable `serialize()` plus `fanIn`/`fanOut` queries, golden-tested
+  against a committed fixture project. `docs/adr/ADR-004-ast-tooling.md`
+  accepted.
 - Canonical contracts (Story 1.2): `@agentic-guardrails/contracts` now ships
   the full pure-Zod schema surface — `Finding` + line-drift-stable
   `computeFindingId`, `RunManifest`, ADR-001 `axiomEnvelope` factory, config

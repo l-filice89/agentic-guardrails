@@ -1,0 +1,3 @@
+# Golden files asserted byte-identical at test time must never be rewritten
+# by autocrlf on checkout.
+tests/__fixtures__/import-graph/expected-graph.json -text

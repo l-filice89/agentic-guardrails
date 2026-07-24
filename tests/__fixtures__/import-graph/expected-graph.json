@@ -1,0 +1,98 @@
+{
+  "nodes": [
+    {
+      "file": "src/aliased/target.ts",
+      "external": false
+    },
+    {
+      "file": "src/barrel.ts",
+      "external": false
+    },
+    {
+      "file": "src/impl.ts",
+      "external": false
+    },
+    {
+      "file": "src/lazy.ts",
+      "external": false
+    },
+    {
+      "file": "src/main.ts",
+      "external": false
+    },
+    {
+      "file": "src/types.ts",
+      "external": false
+    },
+    {
+      "file": "src/types2.ts",
+      "external": false
+    },
+    {
+      "file": "typescript",
+      "external": true
+    },
+    {
+      "file": "unresolvable-pkg-xyz",
+      "external": true
+    }
+  ],
+  "edges": [
+    {
+      "from": "src/barrel.ts",
+      "to": "src/impl.ts",
+      "dynamic": false,
+      "typeOnly": false,
+      "reExport": true
+    },
+    {
+      "from": "src/main.ts",
+      "to": "src/aliased/target.ts",
+      "dynamic": false,
+      "typeOnly": false,
+      "reExport": false
+    },
+    {
+      "from": "src/main.ts",
+      "to": "src/barrel.ts",
+      "dynamic": false,
+      "typeOnly": false,
+      "reExport": false
+    },
+    {
+      "from": "src/main.ts",
+      "to": "src/lazy.ts",
+      "dynamic": true,
+      "typeOnly": false,
+      "reExport": false
+    },
+    {
+      "from": "src/main.ts",
+      "to": "src/types.ts",
+      "dynamic": false,
+      "typeOnly": true,
+      "reExport": false
+    },
+    {
+      "from": "src/main.ts",
+      "to": "src/types2.ts",
+      "dynamic": false,
+      "typeOnly": true,
+      "reExport": false
+    },
+    {
+      "from": "src/main.ts",
+      "to": "typescript",
+      "dynamic": false,
+      "typeOnly": false,
+      "reExport": false
+    },
+    {
+      "from": "src/main.ts",
+      "to": "unresolvable-pkg-xyz",
+      "dynamic": false,
+      "typeOnly": false,
+      "reExport": false
+    }
+  ]
+}
