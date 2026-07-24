@@ -13,5 +13,6 @@ export * from "./finding.js";
 export * from "./finding-id.js";
 export * from "./migration.js";
 export * from "./partial-result.js";
+export * from "./review-artifact.js";
 export * from "./run-manifest.js";
 export * from "./trend-record.js";

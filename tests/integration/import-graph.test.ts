@@ -35,8 +35,14 @@ describe("TypeScriptAdapter import graph (golden fixture)", () => {
   });
 
   it("validates against the contracts partial-result schema", () => {
+    // The serialized envelope carries data/coverage/degraded only — the raw
+    // attempted/unresolved counters are merge inputs, not persisted shape.
     expect(() =>
-      importGraphResultSchema.parse({ ...result, data: graph.toJSON() }),
+      importGraphResultSchema.parse({
+        data: graph.toJSON(),
+        coverage: result.coverage,
+        degraded: result.degraded,
+      }),
     ).not.toThrow();
   });
 

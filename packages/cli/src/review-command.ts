@@ -1,0 +1,93 @@
+/**
+ * `guardrails review` — uncommitted scope (the only scope until 1.15).
+ * Exit codes: 0 clean · 1 error-severity findings · 2 degraded run or
+ * preflight/persistence failure (degradation dominates: a run that silently
+ * lost coverage must never look merely "failed lint").
+ */
+import path from "node:path";
+
+import type { Finding } from "@agentic-guardrails/contracts";
+import {
+  runReview,
+  writeReviewArtifact,
+  type ReviewArtifact,
+} from "@agentic-guardrails/core";
+
+/** Explicit axiom → category labels (never inferred from a finding's ruleId
+ * — an axiom with zero findings of its lead rule must still label correctly). */
+const AXIOM_CATEGORY: Record<string, string> = {
+  "1": "structural",
+};
+
+export async function reviewCommand(cwd: string): Promise<number> {
+  try {
+    const result = await runReview({ cwd });
+    if (!result.ok) {
+      process.stderr.write(`guardrails review: ${result.message}\n`);
+      return 2;
+    }
+
+    const artifactPath = writeReviewArtifact({
+      repoRoot: result.repoRoot,
+      scope: result.artifact.scope,
+      runId: result.artifact.runId,
+      json: result.artifactJson,
+    });
+    const relativePath = path
+      .relative(result.repoRoot, artifactPath)
+      .replaceAll("\\", "/");
+    process.stdout.write(formatSummary(result.artifact, relativePath, result.runDegraded.length));
+
+    if (result.degradedRun) {
+      // Zero-SILENT-degradation: every reason is printed, one line each.
+      for (const d of result.runDegraded) {
+        process.stderr.write(`guardrails review: degraded: ${d.reason} (${d.subject})\n`);
+      }
+      return 2;
+    }
+    return result.artifact.findings.some((f) => f.severity === "error") ? 1 : 0;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`guardrails review: ${message}\n`);
+    return 2;
+  }
+}
+
+/** Plain sequential text (UI-MOCK-GATE ruling: sketch lives in the spec). */
+export function formatSummary(
+  artifact: ReviewArtifact,
+  artifactRelativePath: string,
+  runDegradedCount: number,
+): string {
+  const lines = [`guardrails review (${artifact.scope})`];
+
+  const byAxiom = new Map<string, Finding[]>();
+  for (const finding of artifact.findings) {
+    const group = byAxiom.get(finding.axiom);
+    if (group) group.push(finding);
+    else byAxiom.set(finding.axiom, [finding]);
+  }
+  for (const axiom of [...byAxiom.keys()].sort()) {
+    const group = byAxiom.get(axiom)!;
+    const category = AXIOM_CATEGORY[axiom] ?? "uncategorized";
+    lines.push(`axiom ${axiom} · ${category}   ${severityCounts(group)}`);
+    for (const f of group) {
+      lines.push(`  ${f.location.file}:${f.location.startLine}  ${f.severity}  ${f.message}  [${f.ruleId}]`);
+    }
+  }
+
+  lines.push(`artifact: ${artifactRelativePath}`);
+  lines.push(
+    `${artifact.findings.length} finding${artifact.findings.length === 1 ? "" : "s"} ` +
+      `(${severityCounts(artifact.findings)}) · deterministic tier · ` +
+      `${runDegradedCount} degraded`,
+  );
+  return `${lines.join("\n")}\n`;
+}
+
+function severityCounts(findings: readonly Finding[]): string {
+  const errors = findings.filter((f) => f.severity === "error").length;
+  const warnings = findings.filter((f) => f.severity === "warning").length;
+  const info = findings.filter((f) => f.severity === "info").length;
+  return `${errors} error${errors === 1 ? "" : "s"}, ${warnings} warning${warnings === 1 ? "" : "s"}, ${info} info`;
+}

@@ -24,3 +24,6 @@ dist/
 dist-types/
 *.tsbuildinfo
 *.stackdump
+
+# Guardrails dogfood output (generated review artifacts)
+_agentic-guardrails/

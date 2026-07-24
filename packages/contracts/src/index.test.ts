@@ -258,6 +258,7 @@ describe("migrateArtifact", () => {
     ["run-manifest", "./__fixtures__/run-manifest.v1.json"],
     ["trend-record", "./__fixtures__/trend-record.v1.json"],
     ["disposition-record", "./__fixtures__/disposition-record.v1.json"],
+    ["review-artifact", "./__fixtures__/review-artifact.v1.json"],
   ])("golden round-trip: committed v1 %s fixture migrates and parses green", (kind, path) => {
     const result = migrateArtifact(kind, readJson(path));
     expect(result.ok).toBe(true);

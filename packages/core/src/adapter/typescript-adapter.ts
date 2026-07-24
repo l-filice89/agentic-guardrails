@@ -4,6 +4,7 @@
  * never from hand-rolled path joining. Analyzed code is parsed as data —
  * nothing here executes or imports it.
  */
+import { builtinModules } from "node:module";
 import path from "node:path";
 
 import type { Degradation } from "@agentic-guardrails/contracts";
@@ -19,10 +20,10 @@ import {
 import { ImportGraph, normalizePath } from "../graph/import-graph.js";
 import type {
   BuildImportGraphOptions,
+  ImportGraphBuildResult,
   ImportGraphEdge,
   ImportGraphNode,
   LanguageAdapter,
-  PartialResultOf,
 } from "./language-adapter.js";
 
 interface EdgeFlags {
@@ -33,8 +34,15 @@ interface EdgeFlags {
 
 const STATIC: EdgeFlags = { dynamic: false, typeOnly: false, reExport: false };
 
+/** Node builtins never resolve to a source file — they are verified
+ * externals, not unresolved imports (a `node:fs` import is not coverage loss). */
+const NODE_BUILTINS = new Set(builtinModules);
+function isNodeBuiltin(specifier: string): boolean {
+  return specifier.startsWith("node:") || NODE_BUILTINS.has(specifier);
+}
+
 export class TypeScriptAdapter implements LanguageAdapter {
-  buildImportGraph(options: BuildImportGraphOptions): PartialResultOf<ImportGraph> {
+  buildImportGraph(options: BuildImportGraphOptions): ImportGraphBuildResult {
     const tsConfigFilePath = path.resolve(options.tsconfigPath);
     const rootDir = path.resolve(options.rootDir ?? path.dirname(tsConfigFilePath));
 
@@ -64,6 +72,8 @@ export class TypeScriptAdapter implements LanguageAdapter {
       return {
         data: new ImportGraph([], []),
         coverage: 0,
+        attempted: 0,
+        unresolved: 0,
         degraded: [
           {
             reason: `tsconfig load failed: ${message}`,
@@ -79,6 +89,8 @@ export class TypeScriptAdapter implements LanguageAdapter {
       return {
         data: new ImportGraph([], []),
         coverage: 0,
+        attempted: 0,
+        unresolved: 0,
         degraded: [
           {
             reason: "no project source files under rootDir",
@@ -115,6 +127,12 @@ export class TypeScriptAdapter implements LanguageAdapter {
       resolvedAbsolutePath: string | undefined,
       flags: EdgeFlags,
     ): void => {
+      if (resolvedAbsolutePath === undefined && isNodeBuiltin(specifier)) {
+        attempt(from, specifier, true);
+        nodes.push({ file: specifier, external: true });
+        edges.push({ from, to: specifier, ...flags });
+        return;
+      }
       if (resolvedAbsolutePath !== undefined) {
         const rel = toRel(resolvedAbsolutePath);
         if (rel.includes("node_modules/")) {
@@ -215,7 +233,13 @@ export class TypeScriptAdapter implements LanguageAdapter {
     const graph = new ImportGraph(nodes, edges);
     const coverage =
       attempts.size === 0 ? 1 : (attempts.size - unresolved.size) / attempts.size;
-    return { data: graph, coverage, degraded: [...degradedByKey.values()] };
+    return {
+      data: graph,
+      coverage,
+      attempted: attempts.size,
+      unresolved: unresolved.size,
+      degraded: [...degradedByKey.values()],
+    };
   }
 }
 

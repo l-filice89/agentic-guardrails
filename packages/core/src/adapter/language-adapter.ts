@@ -51,6 +51,19 @@ export interface PartialResultOf<T> {
   degraded: Degradation[];
 }
 
+/**
+ * `buildImportGraph`'s concrete return: the partial-result envelope plus the
+ * raw resolution counters, so multi-tsconfig callers (solution-style repos)
+ * can recompute merged coverage as resolved/attempted across ALL graphs
+ * instead of averaging per-graph ratios.
+ */
+export interface ImportGraphBuildResult extends PartialResultOf<ImportGraph> {
+  /** Unique (from, specifier) resolution attempts in this graph. */
+  attempted: number;
+  /** How many of those attempts failed to resolve. */
+  unresolved: number;
+}
+
 export interface BuildImportGraphOptions {
   /** Path to the analyzed project's tsconfig.json (absolute or cwd-relative). */
   tsconfigPath: string;
@@ -64,5 +77,5 @@ export interface BuildImportGraphOptions {
 /** The seam analyzers depend on. Analyzed code is parsed as data, never
  * executed or imported. */
 export interface LanguageAdapter {
-  buildImportGraph(options: BuildImportGraphOptions): PartialResultOf<ImportGraph>;
+  buildImportGraph(options: BuildImportGraphOptions): ImportGraphBuildResult;
 }

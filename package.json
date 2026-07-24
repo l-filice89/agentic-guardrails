@@ -17,6 +17,7 @@
     "check:boundaries": "node scripts/check-boundaries.cli.mjs"
   },
   "devDependencies": {
+    "@agentic-guardrails/contracts": "workspace:*",
     "@changesets/cli": "^2.31.0",
     "@eslint/js": "^10.0.1",
     "eslint": "^10.6.0",

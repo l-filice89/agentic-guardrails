@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { dispositionRecordSchema } from "./disposition-record.js";
+import { reviewArtifactSchema } from "./review-artifact.js";
 import { runManifestSchema } from "./run-manifest.js";
 import { trendRecordSchema } from "./trend-record.js";
 
@@ -24,6 +25,7 @@ export interface ArtifactTypeMap {
   "run-manifest": z.infer<typeof runManifestSchema>;
   "trend-record": z.infer<typeof trendRecordSchema>;
   "disposition-record": z.infer<typeof dispositionRecordSchema>;
+  "review-artifact": z.infer<typeof reviewArtifactSchema>;
 }
 
 /**
@@ -36,6 +38,7 @@ const registry: Record<string, ArtifactLadder> = Object.assign(Object.create(nul
   "run-manifest": { currentVersion: 1, schema: runManifestSchema, steps: {} },
   "trend-record": { currentVersion: 1, schema: trendRecordSchema, steps: {} },
   "disposition-record": { currentVersion: 1, schema: dispositionRecordSchema, steps: {} },
+  "review-artifact": { currentVersion: 1, schema: reviewArtifactSchema, steps: {} },
 });
 
 export type MigrateResult<T = unknown> =

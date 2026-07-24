@@ -10,6 +10,26 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Walking skeleton — first end-to-end review (Story 1.4):
+  `@agentic-guardrails/cli` ships the `guardrails review` command
+  (uncommitted scope) driving the real static pipeline in core — phase 0
+  preflight (typed git wrapper, spawn-only, no shell interpolation) → phase 1
+  deterministic tier (p-map with per-axiom crash isolation) → phase 4
+  aggregation (findings sorted file → line → axiom) → phase 5 composition.
+  First real Axiom #1 rule, `structural/circular-import`, detects import
+  cycles over the Story-1.3 graph (type-only edges ignored), emitting
+  contracts-valid Findings. The review artifact (with the RunManifest
+  embedded under its `manifest` key — one visibility-atomic temp-file →
+  fsync → rename
+  write) lands in `_agentic-guardrails/reviews/uncommitted/<run-id>.json`,
+  created on demand; the layout adopts the `reviews/<scope>/` addendum
+  default. Run identity is a hash of inputs (no wall clock): identical input
+  produces byte-identical artifact JSON at the same path. Absent ledger and
+  corpus (both 1.8) are declared with empty-string sha256 sentinels plus
+  typed degraded entries — never faked. Exit codes: 0 clean, 1
+  error-severity findings, 2 degraded run or preflight failure. First real
+  e2e test (`tests/integration/walking-skeleton.e2e.test.ts`) spawns the
+  built CLI against temp git repos.
 - TypeScript LanguageAdapter + import graph (Story 1.3):
   `@agentic-guardrails/core` ships the `LanguageAdapter` seam and its
   ts-morph-backed `TypeScriptAdapter`, building a deterministic import graph

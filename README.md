@@ -161,7 +161,20 @@ The v2 runtime lives in a pnpm-workspaces monorepo under `packages/`:
   unverified), and tsconfig load failures all surface as typed degradations
   via the partial-result contract, never throws.
 
-More packages (`llm`, `cli`, `action`, `plugin`) land as later stories need
+- `packages/cli` (`@agentic-guardrails/cli`) — the `guardrails` command.
+  `guardrails review` reviews all uncommitted changes (staged, unstaged,
+  untracked) through the real pipeline: preflight → deterministic analyzers
+  (first rule: `structural/circular-import`, Axiom #1) → aggregation →
+  composition. It prints a plain-text summary and atomically writes a
+  deterministic review artifact — RunManifest embedded, byte-identical for
+  identical input — to `_agentic-guardrails/reviews/uncommitted/<run-id>.json`
+  (the `reviews/<scope>/` layout; the folder is created on demand until the
+  full `init` bootstrap in Story 1.8). Exit codes: `0` clean, `1`
+  error-severity findings, `2` degraded run or preflight failure (e.g. not a
+  git repo). Absent inputs (disposition ledger, corpus) are declared in the
+  manifest with sentinel hashes and typed degradation entries — never faked.
+
+More packages (`llm`, `action`, `plugin`) land as later stories need
 them. See `docs/adr/` for architecture decision records and `roadmap.md` for
 the milestone sequencing.
 
