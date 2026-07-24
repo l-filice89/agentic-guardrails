@@ -2,6 +2,7 @@
 baseline_commit: 301a201b6e7dfaefd35f77abc560f858e34910eb
 status: done
 followup_review_recommended: true
+final_revision: a000ef23de78f13d840712c27d223f0ac47f3821
 ---
 
 # Story 1.1: Monorepo Scaffold with Guarded Boundaries
