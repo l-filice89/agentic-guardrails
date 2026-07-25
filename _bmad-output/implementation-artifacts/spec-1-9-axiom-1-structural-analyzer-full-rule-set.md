@@ -4,6 +4,7 @@ type: 'feature'
 created: '2026-07-24'
 status: 'done'
 baseline_revision: aff0bdee0c51eccdad4d62d0c8e292644cd97b8c
+final_revision: 001856772e64a8a82703b9c1a29316754f1cec44
 review_loop_iteration: 0
 followup_review_recommended: true # AUTO-FORCED: two HIGH inline findings (ENGINE_VERSION cache-upgrade trap; catch-all alias false errors) + oversized acceptance
 context: []
