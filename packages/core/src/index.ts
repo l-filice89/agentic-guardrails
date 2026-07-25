@@ -20,7 +20,24 @@ export * from "./analyzers/axiom5-security.js";
 export * from "./analyzers/axiom6-conformance.js";
 export * from "./cache/deterministic-cache.js";
 export * from "./config/config-loader.js";
-export * from "./git/git.js";
+// Explicit, not `export *`: `gitCommand` ("run any git subcommand in any
+// cwd") stays an internal seam and is deliberately absent from this surface.
+export {
+  EMPTY_TREE_SHA,
+  fileGitStatus,
+  GIT_TIMEOUT_MS,
+  headSha,
+  isRepo,
+  parsePorcelainZ,
+  repoRoot,
+  uncommittedFiles,
+  type FileGitStatus,
+  type GitResult,
+  type GitRunOptions,
+  type RepoRootFailureKind,
+  type RepoRootResult,
+} from "./git/git.js";
+export * from "./git/worktree.js";
 export * from "./graph/import-graph.js";
 export * from "./init/init.js";
 export * from "./init/wiring.js";

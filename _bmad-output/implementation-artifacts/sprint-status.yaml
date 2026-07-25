@@ -57,7 +57,7 @@ development_status:
   1-11-axiom-4-nfr-analyzer-structural-tier: done
   1-12-axiom-5-security-analyzer-regex-ast-tier: done
   1-13-axiom-6-conformance-analyzer-structural-tier: done
-  1-14-spike-5-windows-git-worktree-lifecycle-gate: backlog
+  1-14-spike-5-windows-git-worktree-lifecycle-gate: done
   1-15-review-scopes-branch-pr-and-project: backlog
   1-16-scores-trends-and-dispositions: backlog
   1-17-spike-4-noise-metric-and-labeled-fixtures-gate: backlog

@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   fileGitStatus,
+  gitCommand,
   headSha,
   isRepo,
   parsePorcelainZ,
@@ -117,6 +118,36 @@ describe("fileGitStatus", () => {
     const result = fileGitStatus(tempDir(), "whatever.txt");
     expect(result.ok).toBe(false);
   });
+});
+
+describe("gitCommand", () => {
+  it("kills a git that WAITS, instead of blocking forever", () => {
+    // A git that genuinely blocks on a child process — the shape a credential
+    // prompt takes in 1.15's remote-ref flow, without needing a network. The
+    // `ext::` transport makes git run the command and wait on it. Run from
+    // the OS temp root, not a fixture: killing git leaves the `sleep` holding
+    // its CWD for a moment, which would break the fixture teardown.
+    const started = Date.now();
+    const result = gitCommand(
+      os.tmpdir(),
+      ["-c", "protocol.ext.allow=always", "ls-remote", "ext::sleep 5"],
+      { timeoutMs: 750 },
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toMatch(/timed out after 750ms/);
+    expect(Date.now() - started).toBeLessThan(10_000);
+  }, 60_000);
+
+  it("never waits on a human: interactive prompts are disabled", () => {
+    const dir = tempDir();
+    git(dir, ["init", "-q", "."]);
+    // A remote that would prompt for credentials if git were interactive.
+    const result = gitCommand(dir, ["ls-remote", "https://127.0.0.1:1/nope.git"], {
+      timeoutMs: 20_000,
+    });
+    expect(result.ok).toBe(false);
+  }, 30_000);
 });
 
 describe("parsePorcelainZ", () => {

@@ -8,6 +8,20 @@ import { spawnSync } from "node:child_process";
 
 export type GitResult<T> = { ok: true; value: T } | { ok: false; reason: string };
 
+/** Ceiling on ONE git invocation. Without it a git that waits — most
+ * realistically on a credential prompt while resolving a remote ref — blocks
+ * the process forever. */
+export const GIT_TIMEOUT_MS = 120_000;
+/** Ceiling on captured stdout. The default 1 MiB truncates a large
+ * `worktree list`/`ls-files` into a silently wrong parse. */
+const GIT_MAX_BUFFER = 64 * 1024 * 1024;
+/** Belt and braces with the timeout: git must never WAIT on a human. */
+const NON_INTERACTIVE_ENV = {
+  GIT_TERMINAL_PROMPT: "0",
+  GIT_ASKPASS: "echo",
+  GCM_INTERACTIVE: "never",
+} as const;
+
 /** sha of git's canonical empty tree — the HEAD sentinel before any commit. */
 export const EMPTY_TREE_SHA = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
@@ -18,18 +32,36 @@ interface RawGitFailure {
   spawnCode?: string;
 }
 
-function git(cwd: string, args: readonly string[]): { ok: true; value: string } | RawGitFailure {
+export interface GitRunOptions {
+  /** Override the per-invocation timeout (tests, and callers that know a
+   * command is cheap). */
+  timeoutMs?: number;
+}
+
+function git(
+  cwd: string,
+  args: readonly string[],
+  options: GitRunOptions = {},
+): { ok: true; value: string } | RawGitFailure {
+  const timeout = options.timeoutMs ?? GIT_TIMEOUT_MS;
   const result = spawnSync("git", args as string[], {
     cwd,
     shell: false,
     encoding: "utf8",
     windowsHide: true,
+    timeout,
+    maxBuffer: GIT_MAX_BUFFER,
+    env: { ...process.env, ...NON_INTERACTIVE_ENV },
   });
   if (result.error) {
     const spawnCode = (result.error as NodeJS.ErrnoException).code;
+    const reason =
+      spawnCode === "ETIMEDOUT"
+        ? `git timed out after ${timeout}ms: git ${args.join(" ")}`
+        : `git spawn failed: ${result.error.message}`;
     return {
       ok: false,
-      reason: `git spawn failed: ${result.error.message}`,
+      reason,
       ...(spawnCode === undefined ? {} : { spawnCode }),
     };
   }
@@ -38,6 +70,25 @@ function git(cwd: string, args: readonly string[]): { ok: true; value: string } 
     return { ok: false, reason: stderr || `git exited with status ${result.status}` };
   }
   return { ok: true, value: result.stdout ?? "" };
+}
+
+/**
+ * Runs one git command in `cwd` and returns its stdout, or a typed failure.
+ * The generic seam for commands whose output needs no shared parsing (the
+ * worktree lifecycle, Story 1.14) — same argument-array, never-throws
+ * discipline as every helper below.
+ *
+ * INTERNAL SEAM: deliberately NOT re-exported from `@agentic-guardrails/core`'s
+ * public barrel. "Run any git subcommand in any cwd" is an unguarded
+ * capability; consumers get the named, bounded helpers instead.
+ */
+export function gitCommand(
+  cwd: string,
+  args: readonly string[],
+  options: GitRunOptions = {},
+): GitResult<string> {
+  const result = git(cwd, args, options);
+  return result.ok ? result : { ok: false, reason: result.reason };
 }
 
 /** True only when `cwd` is inside a git work tree. */

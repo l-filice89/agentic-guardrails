@@ -10,6 +10,51 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Worktree isolation lifecycle (Story 1.14 / SPIKE-5,
+  `packages/core/src/git/worktree.ts`): `withWorktree()` creates a detached
+  worktree at a target ref, runs the caller's callback inside it, and always
+  removes it — on return, on throw, on rejection — with bounded retry/backoff
+  and a TYPED `removal-failed` degradation instead of a silent leak (on the
+  throwing path the degradation rides on the propagating error, readable via
+  `worktreeDegradationsOf()`). `reclaimWorktrees()` sweeps residue before
+  every create — the only recovery path after a `SIGKILL`, which runs no
+  cleanup — under an explicit ownership discipline: tool prefix, inside THIS
+  repository's namespaced base (`<root>/<sha256(repoRoot)[:12]>/`, so one
+  repo's sweep can never see another's directories in the shared OS temp
+  root), not live in this process, not the invoking worktree, not
+  `git worktree lock`-ed, and with its `.git` pointing back at this repo —
+  anything else is DECLARED (`locked` / `unowned`), never deleted. Base
+  directory is OS temp, with a DECLARED degrade (`base-dir-degraded`) when it
+  is unwritable or too long for git; the previously-preferred base is swept
+  too, so a degrade cannot orphan residue. Windows handling encoded from
+  measurement: `-c core.longpaths=true` per invocation, `\?\` prefixing for
+  `fs` (UNC-aware), hash-based worktree directories (`agtwt-<sha256(ref)>-
+  <random>`) so `foo`/`FOO` cannot collide on a case-insensitive filesystem,
+  and removal that verifies BOTH the registry and the directory — treating a
+  registry read that FAILED as unknown rather than as "gone". Refs beginning
+  with `-` are rejected and every ref is passed after `--` (argument
+  injection). Git subprocesses now carry a 120 s timeout, a 64 MiB
+  `maxBuffer`, and `GIT_TERMINAL_PROMPT=0` so a credential prompt can never
+  hang a run. `toManifestDegradation()`/`fromManifestDegradation()` adapt the
+  typed degradations to the canonical `contracts` `Degradation` shape.
+  `gitCommand` is an INTERNAL seam and is deliberately not re-exported from
+  core's public barrel.
+- SPIKE-5 gate harness + write-up (`scripts/spike-5-worktree-lifecycle.mjs`,
+  `docs/spikes/SPIKE-5-windows-worktree-lifecycle.md`, raw run output
+  committed at `docs/spikes/SPIKE-5-run-output.txt`): **GATE PASS** on
+  Windows 11 / git 2.39.1.windows.1 — 100 consecutive create → run → cleanup
+  cycles with zero leaked worktrees, zero orphaned locks and an unchanged
+  invoking repository (per-cycle median 458 ms, descriptive only), plus ten
+  injected-failure and measurement scenarios (mid-run `SIGKILL`, held
+  directory handle transient and persistent, >260-char checkout, >260-char
+  base, long base AND deep checkout together, a binary-searched measurement of
+  the real base-length cliff — 213 chars working / 216 failing, vs the
+  conservative 160-char constant — case-collision refs, unusable base,
+  foreign worktree including another repository's live worktree) all ending
+  with zero residue, none skipped. Five negative controls prove the harness
+  bites: dropping the reclamation prefix bound, a no-op removal, a stray
+  prefixed file, a hidden retry count, and deleting the ref hash each turn the
+  gate red.
 - Axiom #6 conformance analyzer (Story 1.13, `rulesetVersion: 6`, documented
   in `docs/rules/axiom-6-conformance.md`): the fifth registered deterministic
   analyzer and the first consumer of the Story-1.8 structural corpus seed.
