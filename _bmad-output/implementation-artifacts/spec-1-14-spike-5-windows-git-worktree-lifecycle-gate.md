@@ -4,6 +4,7 @@ type: 'feature'
 created: '2026-07-25'
 status: 'done'
 baseline_revision: a4d1cde44ac51dd3c02c1555aba1f3ca20b58af0
+final_revision: b0e9c66d23658ddf770fb1efeaa03e8bce54c507
 review_loop_iteration: 0
 followup_review_recommended: true # AUTO-FORCED: five HIGH inline findings (CI-red tests; cross-repo worktree destruction; gate scenarios that could not fail; git-failure-reads-as-success; silent leaks)
 context: []
