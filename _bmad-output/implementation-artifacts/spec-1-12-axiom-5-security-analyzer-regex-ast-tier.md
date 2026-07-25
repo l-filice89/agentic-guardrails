@@ -4,6 +4,7 @@ type: 'feature'
 created: '2026-07-25'
 status: 'done'
 baseline_revision: 17fd3aca2eca091918eac34ab15a2ec539de0752
+final_revision: f286b54a503b238b0a9e7c56bb900ece6c526f0b
 review_loop_iteration: 0
 followup_review_recommended: true # AUTO-FORCED: two HIGH inline findings (regex tier blind to non-TS files; gating false positive on new Function parameter names) + oversized acceptance
 context: []
