@@ -29,25 +29,27 @@
  * indistinguishable from an entry point (a deliberate ceiling; SPIKE-4
  * measures the trade).
  *
- * The other three rules parse ONLY the changed files via a fresh ts-morph
- * pass — changed-set-sized, never project-sized (the SPIKE-3 anti-pattern
- * stays out). Duplicate detection is changed-files-only on purpose: it
+ * The other three rules parse ONLY the changed files via the shared
+ * parse-only pass (`changed-files.ts`, one parse per run across axiom 3 +
+ * axiom 4) — changed-set-sized, never project-sized (the SPIKE-3
+ * anti-pattern stays out). Duplicate detection is changed-files-only on
+ * purpose: it
  * catches copy-paste introduced by the diff (the AI-code case) without a
  * project-wide index.
  */
 import { createHash } from "node:crypto";
-import path from "node:path";
 
 import {
   computeFindingId,
   type Degradation,
   type Finding,
 } from "@agentic-guardrails/contracts";
-import { Node, Project, SyntaxKind, type SourceFile, type Statement } from "ts-morph";
+import { Node, SyntaxKind, type SourceFile, type Statement } from "ts-morph";
 
 import { TypeScriptAdapter } from "../adapter/typescript-adapter.js";
 import type { Analyzer, AnalyzerContext, AnalyzerResult } from "../pipeline/pipeline.js";
 import { foldCase, mergeGraphResults } from "./axiom1-structural.js";
+import { compare, firstLine, parseChangedFiles } from "./changed-files.js";
 
 const AXIOM = "3";
 const RULE_UNREACHABLE = "cleanliness/unreachable-code";
@@ -72,7 +74,9 @@ const TERMINAL_KINDS = new Map<SyntaxKind, string>([
   [SyntaxKind.ContinueStatement, "continue"],
 ]);
 
-const FUNCTION_LIKE_KINDS = new Set<SyntaxKind>([
+/** Function-like node kinds — shared with the axiom-4 NFR analyzer (1.11),
+ * which reuses the same enclosure semantics. */
+export const FUNCTION_LIKE_KINDS = new Set<SyntaxKind>([
   SyntaxKind.FunctionDeclaration,
   SyntaxKind.FunctionExpression,
   SyntaxKind.ArrowFunction,
@@ -128,32 +132,14 @@ export const axiom3Cleanliness: Analyzer = {
     const degraded: Degradation[] = [...graphResult.degraded];
     const findings: Finding[] = [];
 
-    // Deduped change list: a duplicate changedFiles entry must never double
-    // any per-file finding or degradation.
-    const changedList = [...new Set(context.changedFiles)].sort();
-
-    // ---- changed-file AST pass (fresh ts-morph project, no resolution) ----
-    // Parse-only: module specifiers are never resolved here — the graph owns
-    // cross-file truth; this pass owns the changed files' own syntax.
-    const project = new Project({
-      skipAddingFilesFromTsConfig: true,
-      skipFileDependencyResolution: true,
-      compilerOptions: { allowJs: false },
-    });
-    const parsed: [string, SourceFile][] = [];
-    for (const file of changedList) {
-      try {
-        parsed.push([file, project.addSourceFileAtPath(path.join(context.repoRoot, file))]);
-      } catch (error) {
-        // A changed file the pass cannot read is silent coverage loss —
-        // declared, never thrown, never skipped quietly.
-        const message = error instanceof Error ? error.message : String(error);
-        degraded.push({
-          reason: `changed file could not be parsed: ${firstLine(message)}`,
-          subject: file,
-        });
-      }
-    }
+    // ---- changed-file AST pass (shared parse-only project, 1.11 P4) -------
+    // Acquired through the pipeline's run-local seam so axiom 3 + axiom 4
+    // consume ONE parse per run; bare unit-test contexts parse directly.
+    const parse =
+      context.changedFilesCache?.acquire(() => parseChangedFiles(context)) ??
+      parseChangedFiles(context);
+    const parsed = parse.parsed;
+    degraded.push(...parse.degraded);
 
     // ONE pre-pass over the merged edges builds the unused-export usage
     // index — no per-changed-file rescan of the full edge list.
@@ -630,8 +616,9 @@ function functionSymbolName(fn: Node): string | undefined {
 }
 
 /** Enclosing symbol for a statement container: the nearest function-like
- * ancestor's name (anonymous → its kind name — line-free), or "(top-level)". */
-function enclosingSymbolName(node: Node): string {
+ * ancestor's name (anonymous → its kind name — line-free), or "(top-level)".
+ * Exported for the axiom-4 NFR analyzer (1.11) — one naming implementation. */
+export function enclosingSymbolName(node: Node): string {
   let cursor: Node | undefined = Node.isSourceFile(node) ? undefined : node;
   while (cursor !== undefined) {
     if (FUNCTION_LIKE_KINDS.has(cursor.getKind())) {
@@ -640,12 +627,4 @@ function enclosingSymbolName(node: Node): string {
     cursor = cursor.getParent();
   }
   return "(top-level)";
-}
-
-function firstLine(message: string): string {
-  return message.split("\n")[0] ?? message;
-}
-
-function compare(a: string, b: string): number {
-  return a < b ? -1 : a > b ? 1 : 0; // code-point order, locale-independent
 }

@@ -1,0 +1,82 @@
+[
+  {
+    "findingId": "498a89d690cfab86c6f4e04a275ae770556397a6fab1468fc78d0b903f2d292d",
+    "axiom": "4",
+    "ruleId": "nfr/missing-abort-signal",
+    "location": {
+      "file": "src/fetch.ts",
+      "startLine": 3,
+      "endLine": 3
+    },
+    "message": "missing cancellation: `fetch` call without an AbortSignal — pass `{ signal }` (e.g. `AbortSignal.timeout(ms)`) so the request can be cancelled",
+    "tier": "deterministic",
+    "source": "ast",
+    "confidence": 1,
+    "severity": "warning",
+    "enclosingSymbol": "post#fetch-0"
+  },
+  {
+    "findingId": "a7e03eeb4792b3c1361545ab4c541cfb19c9a8c81fd122ec6e31e056bd466b01",
+    "axiom": "4",
+    "ruleId": "nfr/unbounded-promise-all",
+    "location": {
+      "file": "src/promise-all.ts",
+      "startLine": 3,
+      "endLine": 3
+    },
+    "message": "unbounded concurrency: `Promise.all` over a dynamically sized array starts every operation at once — bound the fan-out (p-map-style, with a concurrency limit)",
+    "tier": "deterministic",
+    "source": "ast",
+    "confidence": 1,
+    "severity": "warning",
+    "enclosingSymbol": "fanOut#promise-all-0"
+  },
+  {
+    "findingId": "f1a27dfe1b2ed4c50cfe4555acd76b9e542dc4e594f08ee7936cf21444dfb0cb",
+    "axiom": "4",
+    "ruleId": "nfr/sync-io-in-async",
+    "location": {
+      "file": "src/sync-io.ts",
+      "startLine": 5,
+      "endLine": 5
+    },
+    "message": "sync I/O in async flow: `readFileSync` blocks the event loop inside an async function — use the `node:fs/promises` equivalent",
+    "tier": "deterministic",
+    "source": "ast",
+    "confidence": 1,
+    "severity": "warning",
+    "enclosingSymbol": "load#readFileSync-0"
+  },
+  {
+    "findingId": "5821c2b62e8dcc41e794d234a938cf270157341751d48a2a05bd32303e784e49",
+    "axiom": "4",
+    "ruleId": "nfr/missing-abort-signal",
+    "location": {
+      "file": "src/two-hazards.ts",
+      "startLine": 4,
+      "endLine": 4
+    },
+    "message": "missing cancellation: `fetch` call without an AbortSignal — pass `{ signal }` (e.g. `AbortSignal.timeout(ms)`) so the request can be cancelled",
+    "tier": "deterministic",
+    "source": "ast",
+    "confidence": 1,
+    "severity": "warning",
+    "enclosingSymbol": "both#fetch-0"
+  },
+  {
+    "findingId": "bbdbaa231f98484ef0aa6f68e37e348799c534479a8fd01a7846c193ee5cb4c8",
+    "axiom": "4",
+    "ruleId": "nfr/missing-abort-signal",
+    "location": {
+      "file": "src/two-hazards.ts",
+      "startLine": 5,
+      "endLine": 5
+    },
+    "message": "missing cancellation: `fetch` call without an AbortSignal — pass `{ signal }` (e.g. `AbortSignal.timeout(ms)`) so the request can be cancelled",
+    "tier": "deterministic",
+    "source": "ast",
+    "confidence": 1,
+    "severity": "warning",
+    "enclosingSymbol": "both#fetch-1"
+  }
+]

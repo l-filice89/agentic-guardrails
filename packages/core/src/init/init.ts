@@ -54,6 +54,7 @@ export const CORPUS_MAP_YAML = "schemaVersion: 1\nhumanConfirmed: []\n";
 const AXIOM_DESCRIPTIONS: Record<string, string> = {
   "1": "structural/dependency direction",
   "3": "cleanliness",
+  "4": "nfr: sync I/O, unbounded fan-out, cancellation",
   "5": "security",
 };
 

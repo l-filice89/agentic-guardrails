@@ -23,9 +23,11 @@ import type { Degradation, RunManifest } from "@agentic-guardrails/contracts";
 // `names` — the unused-export usage substrate); same clean-miss rationale.
 export const ENGINE_VERSION = "0.0.3";
 
-/** Version of the deterministic ruleset ("3": Story 1.10 adds the four-rule
- * axiom-3 cleanliness set alongside the 1.9 axiom-1 structural set). */
-export const RULESET_VERSION = "3";
+/** Version of the deterministic ruleset ("4": Story 1.11 adds the three-rule
+ * axiom-4 NFR structural set alongside the 1.9 axiom-1 and 1.10 axiom-3
+ * sets). ENGINE_VERSION stays at 0.0.3 on purpose: 1.11 changes no cached
+ * payload schema — RULESET_VERSION alone invalidates the findings cache. */
+export const RULESET_VERSION = "4";
 
 /** sha256 of the empty string — the sentinel for "this input does not exist yet". */
 export const ABSENT_SHA256 = createHash("sha256").update("").digest("hex");

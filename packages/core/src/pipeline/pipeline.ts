@@ -55,6 +55,8 @@ import {
 } from "../adapter/language-adapter.js";
 import { axiom1Structural } from "../analyzers/axiom1-structural.js";
 import { axiom3Cleanliness } from "../analyzers/axiom3-cleanliness.js";
+import { axiom4Nfr } from "../analyzers/axiom4-nfr.js";
+import type { ChangedFilesCache, ChangedFilesParse } from "../analyzers/changed-files.js";
 import { DeterministicCache, loadCacheSecret } from "../cache/deterministic-cache.js";
 import { evaluateGate, loadConfig, type GateResult } from "../config/config-loader.js";
 import { fileGitStatus, headSha, repoRoot, uncommittedFiles } from "../git/git.js";
@@ -127,6 +129,10 @@ export interface AnalyzerContext {
   /** Optional (absent in bare unit-test contexts): the content-addressed
    * graph cache the pipeline wires in. */
   graphCache?: GraphCache;
+  /** Optional (absent in bare unit-test contexts): the run-local shared
+   * changed-files parse seam — axiom 3 + axiom 4 consume ONE parse per run
+   * (same synchronous-memo discipline as GraphCache.acquire). */
+  changedFilesCache?: ChangedFilesCache;
   /** The phase-1 budget's abort signal, so analyzers CAN observe
    * cancellation. Honest caveat: current analyzers are synchronous and only
    * check between units — an in-flight unit runs to completion. */
@@ -146,7 +152,11 @@ export interface Analyzer {
   run(context: AnalyzerContext): Promise<AnalyzerResult>;
 }
 
-export const DEFAULT_ANALYZERS: readonly Analyzer[] = [axiom1Structural, axiom3Cleanliness];
+export const DEFAULT_ANALYZERS: readonly Analyzer[] = [
+  axiom1Structural,
+  axiom3Cleanliness,
+  axiom4Nfr,
+];
 
 /** Axiom ids the pipeline treats as known BEYOND the registered analyzers:
  * axiom 5 (security) is configurable before its analyzer lands (Epic 3).
@@ -395,12 +405,26 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewRunRes
       .digest("hex");
   };
 
+  // Run-local shared changed-files parse (1.11 P4): two changed-files
+  // analyzers (axiom 3 + axiom 4) consume ONE parse per run. Same
+  // await-free acquire discipline as graphMemo above — the memo check, the
+  // build, and the store happen in one frame, so concurrent analyzers
+  // cannot both observe a miss.
+  let changedFilesMemo: ChangedFilesParse | undefined;
+  const changedFilesCache: ChangedFilesCache = {
+    acquire(build) {
+      changedFilesMemo ??= build();
+      return changedFilesMemo;
+    },
+  };
+
   const context: AnalyzerContext = {
     repoRoot: root.value,
     changedFiles: analyzableFiles,
     tsconfigPaths: discovery.tsconfigPaths,
     ...(config.boundaries === undefined ? {} : { boundaries: config.boundaries }),
     graphCache,
+    changedFilesCache,
     signal: controller.signal,
   };
 

@@ -130,7 +130,7 @@ describe("guardrails review — pipeline hardening e2e (1.7)", () => {
     // Declared six-phase assembly: fixed shape, 2/3 empty-membership with why.
     const phases = second.artifact.manifest.phases!;
     expect(phases.map((p) => p.phase)).toEqual([0, 1, 2, 3, 4, 5]);
-    expect(phases[1]!.members).toEqual(["axiom-1", "axiom-3"]);
+    expect(phases[1]!.members).toEqual(["axiom-1", "axiom-3", "axiom-4"]);
     expect(phases[2]!.members).toEqual([]);
     expect(phases[2]!.reason).toContain("Epic 2");
     expect(phases[3]!.reason).toContain("Epic 3");
@@ -139,9 +139,9 @@ describe("guardrails review — pipeline hardening e2e (1.7)", () => {
   it("HAZARD: a corrupted cache entry still yields correct output plus a degradation note, and is overwritten", () => {
     const repo = makeRepoWithCycle();
     expect(runCli(repo).status).toBe(1);
-    // One per-axiom findings entry each for axiom 1 and axiom 3 (1.10).
+    // One per-axiom findings entry each for axioms 1, 3, and 4 (1.11).
     const entries = readdirSync(findingsCacheDir(repo));
-    expect(entries).toHaveLength(2);
+    expect(entries).toHaveLength(3);
     const entryPath = path.join(findingsCacheDir(repo), entries[0]!);
     for (const entry of entries) {
       writeFileSync(path.join(findingsCacheDir(repo), entry), "{ torn garbage");
@@ -166,7 +166,7 @@ describe("guardrails review — pipeline hardening e2e (1.7)", () => {
     const repo = makeRepoWithCycle();
     expect(runCli(repo).status).toBe(1);
     const entries = readdirSync(findingsCacheDir(repo));
-    expect(entries).toHaveLength(2);
+    expect(entries).toHaveLength(3);
     // The attacker copies each REAL entry's schema-valid shape but swaps the
     // payload (here: "no findings" — hiding the cycle). The MAC no longer
     // matches, so the warm run must not serve it.

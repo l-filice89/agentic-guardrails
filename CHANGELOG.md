@@ -10,6 +10,40 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Axiom #4 NFR analyzer (Story 1.11, `rulesetVersion: 4`, documented in
+  `docs/rules/axiom-4-nfr.md`): a third registered deterministic analyzer
+  with three structural-tier rules over changed files (no import graph) —
+  `nfr/unbounded-promise-all` (`Promise.all`/`allSettled`/`any`/`race` over
+  a dynamically sized array: `.map` results, bare identifiers/calls, spreads
+  of non-literals; only RECURSIVELY fixed-arity array literals are exempt),
+  `nfr/sync-io-in-async` (a `*Sync` member of an imported `fs`,
+  `child_process`, `zlib`, or `crypto` binding — bare or `node:`-prefixed;
+  named/renamed/namespace/default/`{ default as x }` forms — called where
+  the NEAREST enclosing function-like is `async`; module-top-level
+  config-load reads, class field initializers, and static blocks stay
+  exempt), and `nfr/missing-abort-signal` (a global `fetch` call whose
+  options provably lack a signal: absent, `undefined`, `null`, or an options
+  literal without `signal` — incl. a literal `signal: undefined`;
+  non-literal and spread-carrying options are a stated ceiling, never
+  flagged). Zero-false-positive binding checks: `fetch`/`Promise` flag only
+  when they resolve to the ambient global (DI parameters, local wrappers,
+  and wrapper-module imports are skipped), sync-IO calls only when they
+  resolve to the tracked import binding's symbol; `globalThis`/`window`/
+  `self` property access and string-literal bracket access are covered. ALL
+  severities are `warning` by design — the structural tier flags hazard
+  patterns without runtime context, so it never blocks on its own (axiom 4
+  cannot gate in Epic 1; Epic 3's LLM tier is where severity can rise); the
+  violation fixture's oracle run exits 0 with findings persisted.
+  ENGINE_VERSION stays 0.0.3 (no cached-payload schema change) —
+  RULESET_VERSION alone invalidates the findings cache.
+- Shared changed-files parse pass (`packages/core/src/analyzers/changed-files.ts`):
+  axiom 3 and axiom 4 consume ONE parse-only ts-morph pass per run through a
+  run-local `changedFilesCache.acquire` seam on the analyzer context (same
+  synchronous-memo discipline as the graph cache), with the phase-1 budget
+  signal checked between files and per-file read failures declared as typed
+  degradations ("changed file could not be read" — ts-morph parses any text;
+  only the read can fail).
+
 - Axiom #3 cleanliness analyzer (Story 1.10, `rulesetVersion: 3`,
   `engineVersion: 0.0.3`, documented in `docs/rules/axiom-3-cleanliness.md`):
   a second registered deterministic analyzer with four AST-tier rules over

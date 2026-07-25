@@ -54,7 +54,7 @@ development_status:
   1-8-init-and-the-structural-corpus-seed: done
   1-9-axiom-1-structural-analyzer-full-rule-set: done
   1-10-axiom-3-cleanliness-analyzer-ast-tier: done
-  1-11-axiom-4-nfr-analyzer-structural-tier: backlog
+  1-11-axiom-4-nfr-analyzer-structural-tier: done
   1-12-axiom-5-security-analyzer-regex-ast-tier: backlog
   1-13-axiom-6-conformance-analyzer-structural-tier: backlog
   1-14-spike-5-windows-git-worktree-lifecycle-gate: backlog

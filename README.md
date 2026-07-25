@@ -166,9 +166,12 @@ The v2 runtime lives in a pnpm-workspaces monorepo under `packages/`:
   untracked) through the real pipeline: preflight → deterministic analyzers
   (the Axiom #1 structural rule set — circular imports, unresolved imports,
   dependency direction, unassigned files; see
-  `docs/rules/axiom-1-structural.md` — and the Axiom #3 cleanliness rule
+  `docs/rules/axiom-1-structural.md` — the Axiom #3 cleanliness rule
   set — unreachable code, unused exports, copy-paste duplication, excessive
-  complexity; see `docs/rules/axiom-3-cleanliness.md`) → aggregation
+  complexity; see `docs/rules/axiom-3-cleanliness.md` — and the Axiom #4
+  NFR structural rule set — unbounded `Promise.all` fan-out, sync fs I/O in
+  async flow, `fetch` without an AbortSignal; all warnings by design, see
+  `docs/rules/axiom-4-nfr.md`) → aggregation
   (overlapping same-file/same-axiom findings merged per FR-21: >50%-of-the-
   smaller-range overlap, strongest severity, source union, both messages
   preserved) → composition. Unchanged inputs are served from a

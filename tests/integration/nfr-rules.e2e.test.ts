@@ -1,12 +1,14 @@
 /**
- * Story 1.10 cleanliness-rules e2e: copies the on-disk
- * `tests/__fixtures__/cleanliness-rules/` fixtures (tsconfig + src + config)
- * into temp git repos, spawns the BUILT CLI, and machine-compares the
- * persisted findings against `expected-findings.json`: the violation fixture
- * yields exactly the oracle findings byte-stably (asserted twice, normalizing
- * only cache truth), the clean fixture yields ZERO findings and a warm run
- * cache-HITS byte-identically, and the 1.6 off/advisory machinery is
- * verified against the axiom-3 rule set.
+ * Story 1.11 nfr-rules e2e: copies the on-disk
+ * `tests/__fixtures__/nfr-rules/` fixtures (tsconfig + src + config) into
+ * temp git repos, spawns the BUILT CLI, and machine-compares the persisted
+ * findings against `expected-findings.json`: the violation fixture yields
+ * exactly the oracle findings byte-stably (asserted twice, normalizing only
+ * cache truth) and — all axiom-4 findings being warnings by design — the
+ * run EXITS 0 with the findings persisted (the honest structural-tier
+ * posture, not a bug); the clean fixture yields ZERO findings and a warm
+ * run cache-HITS byte-identically; the 1.6 off/advisory machinery is
+ * verified against the axiom-4 rule set.
  *
  * Requires `pnpm -r build` first (CI builds before tests).
  */
@@ -38,12 +40,12 @@ import { normalizeCacheTruth } from "../../packages/core/src/pipeline/normalize-
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const cliPath = path.join(repoRoot, "packages", "cli", "dist", "index.js");
-const fixturesDir = path.join(repoRoot, "tests", "__fixtures__", "cleanliness-rules");
+const fixturesDir = path.join(repoRoot, "tests", "__fixtures__", "nfr-rules");
 
 const tempDirs: string[] = [];
 
 function tempDir(): string {
-  const dir = mkdtempSync(path.join(os.tmpdir(), "guardrails-cleanliness-e2e-"));
+  const dir = mkdtempSync(path.join(os.tmpdir(), "guardrails-nfr-e2e-"));
   tempDirs.push(dir);
   return dir;
 }
@@ -93,14 +95,26 @@ function findingsBytes(artifact: Record<string, unknown>): string {
   return `${JSON.stringify(artifact["findings"], null, 2)}\n`;
 }
 
-/** Uncommitted axiom-3-only violation for the off/advisory rows: a
- * zero-importer file with unreachable code (exempt from unused-export,
- * invisible to axiom 1). */
-function addUnreachableFile(repo: string): void {
+/** Uncommitted axiom-4-only violation for the off/advisory rows: a fetch
+ * without a signal (invisible to axioms 1 and 3 — no imports, zero
+ * importers, tiny body). */
+function addFetchFile(repo: string): void {
   writeFileSync(
     path.join(repo, "src", "extra.ts"),
-    "export function extra(): number {\n  return 1;\n  const dead = 2;\n  void dead;\n}\n",
+    "export async function extra(url: string): Promise<number> {\n  const res = await fetch(url);\n  return res.status;\n}\n",
   );
+}
+
+/** Rewrite the fixture config's `axioms: {}` anchor; a no-op replacement
+ * throws so fixture drift can never make the off/advisory tests vacuous. */
+function setAxioms(repo: string, axiomsYaml: string): void {
+  const configPath = path.join(repo, "_agentic-guardrails", "config.yaml");
+  const config = readFileSync(configPath, "utf8");
+  const replaced = config.replace("axioms: {}", axiomsYaml);
+  if (replaced === config) {
+    throw new Error("fixture drift: `axioms: {}` anchor not found in config.yaml");
+  }
+  writeFileSync(configPath, replaced);
 }
 
 beforeAll(() => {
@@ -113,30 +127,42 @@ afterEach(() => {
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-describe("guardrails review — axiom-3 cleanliness rule set e2e (Story 1.10)", () => {
-  it("violation fixture matches expected-findings.json exactly — all four rules, real lines, byte-stable twice", () => {
+describe("guardrails review — axiom-4 NFR rule set e2e (Story 1.11)", () => {
+  it("violation fixture matches expected-findings.json exactly — all three rules, real lines, all warnings, EXIT 0 with findings persisted, byte-stable twice", () => {
     const repo = makeRepo("violation");
     const golden = readFileSync(
       path.join(fixturesDir, "violation", "expected-findings.json"),
       "utf8",
     );
 
-    // Every import resolves and no degradation fires: the exit code is the
-    // honest gate verdict (blocking findings → 1), never a degraded 2.
+    // Every import resolves and no degradation fires. All axiom-4 findings
+    // are WARNINGS by design (the structural tier flags hazard patterns, it
+    // cannot prove runtime context), so the gate PASSES: exit 0 WITH the
+    // findings persisted — the honest posture, asserted explicitly.
     const first = runCli(repo);
     expect(first.stderr).not.toContain("degraded");
-    expect(first.status).toBe(1);
+    expect(first.status).toBe(0);
+    expect(first.stdout).toContain("5 findings (0 errors, 5 warnings, 0 info)");
     const firstArtifact = readSingleArtifact(repo);
     expect(reviewArtifactSchema.safeParse(firstArtifact.artifact).success).toBe(true);
-    for (const finding of firstArtifact.artifact["findings"] as unknown[]) {
+    const findings = firstArtifact.artifact["findings"] as Record<string, unknown>[];
+    expect(findings).toHaveLength(5);
+    for (const finding of findings) {
       expect(findingSchema.safeParse(finding).success).toBe(true);
+      expect(finding).toMatchObject({
+        axiom: "4",
+        tier: "deterministic",
+        source: "ast",
+        confidence: 1,
+        severity: "warning",
+      });
     }
     // ORACLE: machine-compared, byte-for-byte.
     expect(findingsBytes(firstArtifact.artifact)).toBe(golden);
 
     // Determinism: identical input ⇒ byte-identical artifact (modulo the
     // documented manifest.cache carve-out).
-    expect(runCli(repo).status).toBe(1);
+    expect(runCli(repo).status).toBe(0);
     const secondArtifact = readSingleArtifact(repo);
     expect(findingsBytes(secondArtifact.artifact)).toBe(golden);
     expect(normalizeCacheTruth(secondArtifact.raw)).toBe(normalizeCacheTruth(firstArtifact.raw));
@@ -152,79 +178,46 @@ describe("guardrails review — axiom-3 cleanliness rule set e2e (Story 1.10)", 
     expect(reviewArtifactSchema.safeParse(first.artifact).success).toBe(true);
     expect(first.artifact["findings"]).toEqual([]);
 
-    // Cache-HIT byte identity over the 1.10 payload (edge `names` in the
-    // cached graph): only the clean fixture can carry this — degraded
-    // results are never cached.
+    // Cache-HIT byte identity: the warm run serves the identical data.
     const warm = runCli(repo);
     expect(warm.status).toBe(0);
     const second = readSingleArtifact(repo);
-    const cache = (second.artifact["manifest"] as Record<string, unknown>)["cache"] as {
-      hits: number;
-      invalid: number;
-    };
-    expect(cache.hits).toBeGreaterThan(0);
-    expect(cache.invalid).toBe(0);
-    expect(normalizeCacheTruth(second.raw)).toBe(normalizeCacheTruth(first.raw));
-  });
-
-  it("graph payload roundtrip: with findings entries deleted, the warm run rebuilds findings FROM the cached graph byte-identically", () => {
-    const repo = makeRepo("clean");
-    const cold = runCli(repo);
-    expect(cold.status).toBe(0);
-    const first = readSingleArtifact(repo);
-
-    // A findings-cache hit would skip the graph build entirely — delete the
-    // findings entries (keep the graph entries) so the second run MUST
-    // deserialize the cached graph payload and recompute findings from it.
-    rmSync(path.join(repo, "_agentic-guardrails", ".cache", "findings"), {
-      recursive: true,
-      force: true,
+    // EXACT counter shape: one findings hit per registered analyzer (axioms
+    // 1, 3, 4), no graph acquisition (every analyzer was served whole), no
+    // misses, no invalid entries.
+    expect((second.artifact["manifest"] as Record<string, unknown>)["cache"]).toEqual({
+      hits: 3,
+      misses: 0,
+      invalid: 0,
     });
-    const warm = runCli(repo);
-    expect(warm.status).toBe(0);
-    const second = readSingleArtifact(repo);
-    const cache = (second.artifact["manifest"] as Record<string, unknown>)["cache"];
-    // Exactly ONE graph hit (one tsconfig; the run-local memo covers the
-    // second graph consumer) and THREE findings misses (axioms 1, 3, 4 —
-    // 1.11): the findings were recomputed from the deserialized graph, not
-    // served whole.
-    expect(cache).toMatchObject({ hits: 1, misses: 3, invalid: 0 });
     expect(normalizeCacheTruth(second.raw)).toBe(normalizeCacheTruth(first.raw));
   });
 
-  it("axiom 3 off: analyzer skipped and declared in manifest.axiomsOff, no cleanliness findings", () => {
+  it("axiom 4 off: analyzer skipped and declared in manifest.axiomsOff, no nfr findings", () => {
     const repo = makeRepo("clean");
-    addUnreachableFile(repo); // would fire if axiom 3 ran
-    const config = readFileSync(path.join(repo, "_agentic-guardrails", "config.yaml"), "utf8");
-    writeFileSync(
-      path.join(repo, "_agentic-guardrails", "config.yaml"),
-      config.replace("axioms: {}", "axioms:\n  '3':\n    enforcement: 'off'"),
-    );
+    addFetchFile(repo); // would fire if axiom 4 ran
+    setAxioms(repo, "axioms:\n  '4':\n    enforcement: 'off'");
     const result = runCli(repo);
     expect(result.status).toBe(0);
-    expect(result.stdout).not.toContain("cleanliness/");
+    expect(result.stdout).not.toContain("nfr/");
     const { artifact } = readSingleArtifact(repo);
     expect(artifact["findings"]).toEqual([]);
-    expect((artifact["manifest"] as Record<string, unknown>)["axiomsOff"]).toEqual(["3"]);
+    expect((artifact["manifest"] as Record<string, unknown>)["axiomsOff"]).toEqual(["4"]);
   });
 
-  it("axiom 3 advisory: findings present and persisted, gate passes (exit 0)", () => {
+  it("axiom 4 advisory: findings present and persisted, gate passes (exit 0)", () => {
     const repo = makeRepo("clean");
-    addUnreachableFile(repo);
-    const config = readFileSync(path.join(repo, "_agentic-guardrails", "config.yaml"), "utf8");
-    writeFileSync(
-      path.join(repo, "_agentic-guardrails", "config.yaml"),
-      config.replace("axioms: {}", "axioms:\n  '3':\n    enforcement: advisory"),
-    );
+    addFetchFile(repo);
+    setAxioms(repo, "axioms:\n  '4':\n    enforcement: advisory");
     const result = runCli(repo);
-    expect(result.status).toBe(0); // advisory error finding never gates
-    expect(result.stdout).toContain("cleanliness/unreachable-code");
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("nfr/missing-abort-signal");
     const { artifact } = readSingleArtifact(repo);
     const findings = artifact["findings"] as Record<string, unknown>[];
     expect(findings).toHaveLength(1);
     expect(findings[0]).toMatchObject({
-      ruleId: "cleanliness/unreachable-code",
-      severity: "error",
+      ruleId: "nfr/missing-abort-signal",
+      severity: "warning",
     });
     expect((artifact["gate"] as Record<string, unknown>)["pass"]).toBe(true);
   });

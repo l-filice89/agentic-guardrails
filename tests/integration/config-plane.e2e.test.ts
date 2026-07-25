@@ -152,6 +152,7 @@ describe("guardrails review — config plane e2e", () => {
       perAxiom: [
         { axiom: "1", enforcement: "advisory", errorFindings: 1, maxFindings: 0, pass: true },
         { axiom: "3", enforcement: "blocking", errorFindings: 0, maxFindings: 0, pass: true },
+        { axiom: "4", enforcement: "blocking", errorFindings: 0, maxFindings: 0, pass: true },
         { axiom: "5", enforcement: "blocking", errorFindings: 0, maxFindings: 0, pass: true },
       ],
     });

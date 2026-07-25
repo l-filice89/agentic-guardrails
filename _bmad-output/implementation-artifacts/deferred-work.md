@@ -15,3 +15,9 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-9-axiom-1-structural-analyzer-full-rule-set.md`
   summary: structural/unassigned-file has no exemption mechanism (no ignore list, no unlayered declaration) - in real repos every changed tooling/test-helper file outside declared layers warns; decide the exemption surface once noise is measurable. Candidate owner: story 1.17 (SPIKE-4 noise metric) with config surface if the metric confirms.
   evidence: Review finding - the rule is opt-in via boundaries and warning-severity (non-gating), but reviewers flagged it as guaranteed noise in any repo with undeclared tooling paths; SPIKE-4 exists to measure exactly this.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-11-axiom-4-nfr-analyzer-structural-tier.md`
+  summary: enclosingSymbol in persisted findings carries the synthetic findingId discriminator (e.g. post#fetch-0), not the actual enclosing symbol - a consumer rendering the field shows plumbing. Decide whether to split discriminator from display symbol (contracts change, findingId churn). Candidate owner: story 1.16 (dispositions render findings) or Epic 4 evidence trail.
+  evidence: Review finding - convention started in 1.10, tripled by 1.11; changing it later means findingId churn for existing artifacts, so the decision should be taken before dispositions accumulate.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-11-axiom-4-nfr-analyzer-structural-tier.md`
+  summary: Global RULESET_VERSION cold-starts every axiom cache on any single-axiom rule change (bumping to 4 invalidated axioms 1 and 3 whose rules were untouched). Decide per-axiom ruleset versioning before more analyzers land. Candidate owner: pre-Epic-3 (1.19 or epic-end sweep).
+  evidence: Review finding - three analyzers now share one version string; collateral invalidation grows linearly with analyzer count and is undocumented in the manifest.
