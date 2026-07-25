@@ -4,6 +4,7 @@ type: 'feature'
 created: '2026-07-25'
 status: 'done'
 baseline_revision: 2e04a6f8cb86f71e6a9736ee145bdf41227c1e19
+final_revision: 371e4cbf05ded34765d1839e9a4c578d62ecef81
 review_loop_iteration: 0
 followup_review_recommended: true # judgment: 21 patches with behavior-changing breadth (binding resolution, detection envelope, shared-parse refactor touching axiom 3) — significant by volume and breadth
 context: []
