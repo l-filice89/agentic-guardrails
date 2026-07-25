@@ -4,6 +4,7 @@ type: 'feature'
 created: '2026-07-25'
 status: 'done'
 baseline_revision: 195a8e58ea2fea1a31b8135d04327d70970b9aea
+final_revision: 8071274924055186c19112689d8fb5ebaf840475
 review_loop_iteration: 0
 followup_review_recommended: true # AUTO-FORCED: three HIGH inline findings (inverted judged/voter split; forgeable exit carve-out; invisible inconclusive state) + oversized acceptance
 context: []
