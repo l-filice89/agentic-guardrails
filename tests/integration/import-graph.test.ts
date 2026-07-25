@@ -58,6 +58,7 @@ describe("TypeScriptAdapter import graph (golden fixture)", () => {
       typeOnly: false,
       reExport: false,
       line: 3,
+      names: ["aliased"],
     });
   });
 
@@ -69,6 +70,7 @@ describe("TypeScriptAdapter import graph (golden fixture)", () => {
       typeOnly: false,
       reExport: false,
       line: 4,
+      names: ["fromBarrel"],
     });
     const chain = graph.fanOut("src/barrel.ts");
     expect(chain.coverage).toBe(1);
@@ -80,6 +82,7 @@ describe("TypeScriptAdapter import graph (golden fixture)", () => {
         typeOnly: false,
         reExport: true,
         line: 2,
+        names: ["fromBarrel"],
       },
     ]);
   });
@@ -92,6 +95,7 @@ describe("TypeScriptAdapter import graph (golden fixture)", () => {
       typeOnly: false,
       reExport: false,
       line: 11,
+      names: ["*"],
     });
   });
 
@@ -103,6 +107,7 @@ describe("TypeScriptAdapter import graph (golden fixture)", () => {
       typeOnly: true,
       reExport: false,
       line: 7,
+      names: ["SomeType"],
     });
   });
 
@@ -114,6 +119,7 @@ describe("TypeScriptAdapter import graph (golden fixture)", () => {
       typeOnly: true,
       reExport: false,
       line: 8,
+      names: ["OnlyInline"],
     });
   });
 
@@ -126,6 +132,7 @@ describe("TypeScriptAdapter import graph (golden fixture)", () => {
       typeOnly: false,
       reExport: false,
       line: 2,
+      names: ["*"],
     });
     expect(graph.fanOut("typescript").data.count).toBe(0);
     // Resolved externals are verified — no degraded entry for them.
@@ -141,6 +148,7 @@ describe("TypeScriptAdapter import graph (golden fixture)", () => {
       typeOnly: false,
       reExport: false,
       line: 6,
+      names: [],
     });
     expect(result.degraded).toContainEqual({
       reason: "unresolved bare specifier",

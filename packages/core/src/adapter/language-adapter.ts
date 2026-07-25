@@ -20,7 +20,14 @@ export type ImportGraphNode = z.infer<typeof importGraphNodeSchema>;
 
 /** One resolved import/re-export relationship between two nodes. `line` is
  * the 1-based start line of the import/export declaration (dynamic imports:
- * the call site) — the anchor every axiom-1 rule reports at. */
+ * the call site) — the anchor every axiom-1 rule reports at. `names` are the
+ * binding names this edge imports/re-exports from the target (1.10 usage
+ * substrate for `cleanliness/unused-export`): `"*"` for a namespace import,
+ * `export *`, dynamic `import()`, `require()`, or `import =` (the whole
+ * namespace), `"default"` for a default import, else the target-module
+ * names of the named bindings (type-only included). Side-effect imports
+ * carry `[]`. Sorted + unique; NOT part of edge identity — same-identity
+ * edges union their names (1.9 dedup ruling). */
 export const importGraphEdgeSchema = z.strictObject({
   from: z.string().min(1),
   to: z.string().min(1),
@@ -28,6 +35,7 @@ export const importGraphEdgeSchema = z.strictObject({
   typeOnly: z.boolean(),
   reExport: z.boolean(),
   line: z.int().positive(),
+  names: z.array(z.string()),
 });
 export type ImportGraphEdge = z.infer<typeof importGraphEdgeSchema>;
 

@@ -1,13 +1,12 @@
 /**
- * Story 1.9 structural-rules e2e: copies the on-disk
- * `tests/__fixtures__/structural-rules/` fixtures (tsconfig + src +
- * boundaries config) into temp git repos, spawns the BUILT CLI, and
- * machine-compares the persisted findings against `expected-findings.json`
- * (the `expected-graph.json` pattern applied to findings): the violation
- * fixture yields exactly the oracle findings byte-stably (asserted twice,
- * normalizing only cache truth), the clean fixture yields ZERO findings
- * (false-positive guard feeding SPIKE-4), and the 1.6 off/advisory
- * machinery is verified against the grown rule set.
+ * Story 1.10 cleanliness-rules e2e: copies the on-disk
+ * `tests/__fixtures__/cleanliness-rules/` fixtures (tsconfig + src + config)
+ * into temp git repos, spawns the BUILT CLI, and machine-compares the
+ * persisted findings against `expected-findings.json`: the violation fixture
+ * yields exactly the oracle findings byte-stably (asserted twice, normalizing
+ * only cache truth), the clean fixture yields ZERO findings and a warm run
+ * cache-HITS byte-identically, and the 1.6 off/advisory machinery is
+ * verified against the axiom-3 rule set.
  *
  * Requires `pnpm -r build` first (CI builds before tests).
  */
@@ -39,12 +38,12 @@ import { normalizeCacheTruth } from "../../packages/core/src/pipeline/normalize-
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const cliPath = path.join(repoRoot, "packages", "cli", "dist", "index.js");
-const fixturesDir = path.join(repoRoot, "tests", "__fixtures__", "structural-rules");
+const fixturesDir = path.join(repoRoot, "tests", "__fixtures__", "cleanliness-rules");
 
 const tempDirs: string[] = [];
 
 function tempDir(): string {
-  const dir = mkdtempSync(path.join(os.tmpdir(), "guardrails-structural-e2e-"));
+  const dir = mkdtempSync(path.join(os.tmpdir(), "guardrails-cleanliness-e2e-"));
   tempDirs.push(dir);
   return dir;
 }
@@ -55,9 +54,9 @@ function git(cwd: string, args: string[]): void {
 }
 
 /**
- * Temp git repo from a fixture: tsconfig + boundaries config committed as
- * the base, the entire `src/` tree left UNTRACKED — every fixture source is
- * a changed file, which is exactly the scope the rules review.
+ * Temp git repo from a fixture: tsconfig + config committed as the base,
+ * the entire `src/` tree left UNTRACKED — every fixture source is a changed
+ * file, which is exactly the scope the rules review.
  */
 function makeRepo(fixture: "violation" | "clean"): string {
   const fixtureDir = path.join(fixturesDir, fixture);
@@ -94,6 +93,16 @@ function findingsBytes(artifact: Record<string, unknown>): string {
   return `${JSON.stringify(artifact["findings"], null, 2)}\n`;
 }
 
+/** Uncommitted axiom-3-only violation for the off/advisory rows: a
+ * zero-importer file with unreachable code (exempt from unused-export,
+ * invisible to axiom 1). */
+function addUnreachableFile(repo: string): void {
+  writeFileSync(
+    path.join(repo, "src", "extra.ts"),
+    "export function extra(): number {\n  return 1;\n  const dead = 2;\n  void dead;\n}\n",
+  );
+}
+
 beforeAll(() => {
   if (!existsSync(cliPath)) {
     throw new Error(`built CLI missing at ${cliPath} — run \`pnpm -r build\` first`);
@@ -104,15 +113,19 @@ afterEach(() => {
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-describe("guardrails review — axiom-1 structural rule set e2e (Story 1.9)", () => {
+describe("guardrails review — axiom-3 cleanliness rule set e2e (Story 1.10)", () => {
   it("violation fixture matches expected-findings.json exactly — all four rules, real lines, byte-stable twice", () => {
     const repo = makeRepo("violation");
-    const golden = readFileSync(path.join(fixturesDir, "violation", "expected-findings.json"), "utf8");
+    const golden = readFileSync(
+      path.join(fixturesDir, "violation", "expected-findings.json"),
+      "utf8",
+    );
 
-    // The unresolved import is ALSO a declared coverage degradation
-    // (coverage truth stays) — degradation dominance makes this exit 2.
+    // Every import resolves and no degradation fires: the exit code is the
+    // honest gate verdict (blocking findings → 1), never a degraded 2.
     const first = runCli(repo);
-    expect(first.status).toBe(2);
+    expect(first.stderr).not.toContain("degraded");
+    expect(first.status).toBe(1);
     const firstArtifact = readSingleArtifact(repo);
     expect(reviewArtifactSchema.safeParse(firstArtifact.artifact).success).toBe(true);
     for (const finding of firstArtifact.artifact["findings"] as unknown[]) {
@@ -120,22 +133,16 @@ describe("guardrails review — axiom-1 structural rule set e2e (Story 1.9)", ()
     }
     // ORACLE: machine-compared, byte-for-byte.
     expect(findingsBytes(firstArtifact.artifact)).toBe(golden);
-    // The paired graph degradation for the unresolved import is still there.
-    expect(
-      (firstArtifact.artifact["degraded"] as { reason: string }[]).some(
-        (d) => d.reason === "unresolvable import specifier",
-      ),
-    ).toBe(true);
 
     // Determinism: identical input ⇒ byte-identical artifact (modulo the
     // documented manifest.cache carve-out).
-    expect(runCli(repo).status).toBe(2);
+    expect(runCli(repo).status).toBe(1);
     const secondArtifact = readSingleArtifact(repo);
     expect(findingsBytes(secondArtifact.artifact)).toBe(golden);
     expect(normalizeCacheTruth(secondArtifact.raw)).toBe(normalizeCacheTruth(firstArtifact.raw));
   });
 
-  it("clean fixture yields ZERO findings (boundaries declared, all imports legal), exit 0 — and a warm run cache-HITS byte-identically", () => {
+  it("clean fixture yields ZERO findings, exit 0 — and a warm run cache-HITS byte-identically", () => {
     const repo = makeRepo("clean");
     const result = runCli(repo);
     expect(result.stderr).not.toContain("degraded");
@@ -145,9 +152,9 @@ describe("guardrails review — axiom-1 structural rule set e2e (Story 1.9)", ()
     expect(reviewArtifactSchema.safeParse(first.artifact).success).toBe(true);
     expect(first.artifact["findings"]).toEqual([]);
 
-    // Cache-HIT byte identity over the NEW 1.9 payload fields (edge `line`,
-    // `unresolvedImports`): only the clean fixture can carry this — the
-    // violation fixture degrades, and degraded results are never cached.
+    // Cache-HIT byte identity over the 1.10 payload (edge `names` in the
+    // cached graph): only the clean fixture can carry this — degraded
+    // results are never cached.
     const warm = runCli(repo);
     expect(warm.status).toBe(0);
     const second = readSingleArtifact(repo);
@@ -160,46 +167,62 @@ describe("guardrails review — axiom-1 structural rule set e2e (Story 1.9)", ()
     expect(normalizeCacheTruth(second.raw)).toBe(normalizeCacheTruth(first.raw));
   });
 
-  it("axiom 1 off: analyzer skipped and declared in manifest.axiomsOff, no structural findings", () => {
+  it("graph payload roundtrip: with findings entries deleted, the warm run rebuilds findings FROM the cached graph byte-identically", () => {
     const repo = makeRepo("clean");
-    // Direction breach in an uncommitted file — would fire if axiom 1 ran.
-    writeFileSync(
-      path.join(repo, "src", "lib", "sneaky.ts"),
-      'import { main } from "../app/main.js";\nexport const sneaky = main;\n',
-    );
+    const cold = runCli(repo);
+    expect(cold.status).toBe(0);
+    const first = readSingleArtifact(repo);
+
+    // A findings-cache hit would skip the graph build entirely — delete the
+    // findings entries (keep the graph entries) so the second run MUST
+    // deserialize the cached graph payload and recompute findings from it.
+    rmSync(path.join(repo, "_agentic-guardrails", ".cache", "findings"), {
+      recursive: true,
+      force: true,
+    });
+    const warm = runCli(repo);
+    expect(warm.status).toBe(0);
+    const second = readSingleArtifact(repo);
+    const cache = (second.artifact["manifest"] as Record<string, unknown>)["cache"];
+    // Exactly ONE graph hit (one tsconfig; the run-local memo covers the
+    // second analyzer) and TWO findings misses (axiom 1 + axiom 3): the
+    // findings were recomputed from the deserialized graph, not served whole.
+    expect(cache).toMatchObject({ hits: 1, misses: 2, invalid: 0 });
+    expect(normalizeCacheTruth(second.raw)).toBe(normalizeCacheTruth(first.raw));
+  });
+
+  it("axiom 3 off: analyzer skipped and declared in manifest.axiomsOff, no cleanliness findings", () => {
+    const repo = makeRepo("clean");
+    addUnreachableFile(repo); // would fire if axiom 3 ran
     const config = readFileSync(path.join(repo, "_agentic-guardrails", "config.yaml"), "utf8");
     writeFileSync(
       path.join(repo, "_agentic-guardrails", "config.yaml"),
-      config.replace("axioms:", "axioms:\n  '1':\n    enforcement: 'off'"),
+      config.replace("axioms: {}", "axioms:\n  '3':\n    enforcement: 'off'"),
     );
     const result = runCli(repo);
     expect(result.status).toBe(0);
-    expect(result.stdout).not.toContain("structural/");
+    expect(result.stdout).not.toContain("cleanliness/");
     const { artifact } = readSingleArtifact(repo);
     expect(artifact["findings"]).toEqual([]);
-    // The fixture config already switches axiom 3 off (fixture isolation).
-    expect((artifact["manifest"] as Record<string, unknown>)["axiomsOff"]).toEqual(["1", "3"]);
+    expect((artifact["manifest"] as Record<string, unknown>)["axiomsOff"]).toEqual(["3"]);
   });
 
-  it("axiom 1 advisory: findings present and persisted, gate passes (exit 0)", () => {
+  it("axiom 3 advisory: findings present and persisted, gate passes (exit 0)", () => {
     const repo = makeRepo("clean");
-    writeFileSync(
-      path.join(repo, "src", "lib", "sneaky.ts"),
-      'import { main } from "../app/main.js";\nexport const sneaky = main;\n',
-    );
+    addUnreachableFile(repo);
     const config = readFileSync(path.join(repo, "_agentic-guardrails", "config.yaml"), "utf8");
     writeFileSync(
       path.join(repo, "_agentic-guardrails", "config.yaml"),
-      config.replace("axioms:", "axioms:\n  '1':\n    enforcement: advisory"),
+      config.replace("axioms: {}", "axioms:\n  '3':\n    enforcement: advisory"),
     );
     const result = runCli(repo);
     expect(result.status).toBe(0); // advisory error finding never gates
-    expect(result.stdout).toContain("structural/dependency-direction");
+    expect(result.stdout).toContain("cleanliness/unreachable-code");
     const { artifact } = readSingleArtifact(repo);
     const findings = artifact["findings"] as Record<string, unknown>[];
     expect(findings).toHaveLength(1);
     expect(findings[0]).toMatchObject({
-      ruleId: "structural/dependency-direction",
+      ruleId: "cleanliness/unreachable-code",
       severity: "error",
     });
     expect((artifact["gate"] as Record<string, unknown>)["pass"]).toBe(true);

@@ -54,6 +54,7 @@ import {
   type ImportGraphBuildResult,
 } from "../adapter/language-adapter.js";
 import { axiom1Structural } from "../analyzers/axiom1-structural.js";
+import { axiom3Cleanliness } from "../analyzers/axiom3-cleanliness.js";
 import { DeterministicCache, loadCacheSecret } from "../cache/deterministic-cache.js";
 import { evaluateGate, loadConfig, type GateResult } from "../config/config-loader.js";
 import { fileGitStatus, headSha, repoRoot, uncommittedFiles } from "../git/git.js";
@@ -100,10 +101,14 @@ const cachedGraphSchema = z.strictObject({
 
 /** Content-addressed graph cache seam (1.7): graph-building analyzers route
  * builds through this so unchanged inputs skip the parse entirely (SPIKE-3's
- * recorded reuse win). `get` returning undefined = miss → build + `put`. */
+ * recorded reuse win). `acquire` checks the run-local memo, then the
+ * persistent cache, then calls `build` — check + build + store in ONE
+ * synchronous frame (no await anywhere inside), which is what makes the
+ * one-parse-per-tsconfig-per-run invariant robust: two analyzers can never
+ * race past the same miss, even if their `run` bodies await between
+ * acquisitions. */
 export interface GraphCache {
-  get(tsconfigPath: string): ImportGraphBuildResult | undefined;
-  put(tsconfigPath: string, result: ImportGraphBuildResult): void;
+  acquire(tsconfigPath: string, build: () => ImportGraphBuildResult): ImportGraphBuildResult;
 }
 
 export interface AnalyzerContext {
@@ -141,7 +146,7 @@ export interface Analyzer {
   run(context: AnalyzerContext): Promise<AnalyzerResult>;
 }
 
-export const DEFAULT_ANALYZERS: readonly Analyzer[] = [axiom1Structural];
+export const DEFAULT_ANALYZERS: readonly Analyzer[] = [axiom1Structural, axiom3Cleanliness];
 
 /** Axiom ids the pipeline treats as known BEYOND the registered analyzers:
  * axiom 5 (security) is configurable before its analyzer lands (Epic 3).
@@ -300,47 +305,66 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewRunRes
     secret === undefined ? undefined : new DeterministicCache(cacheRoot, secret);
   const analyzableHashes = fileHashes.filter(([file]) => isAnalyzableTs(file));
   const controller = new AbortController();
+  // Run-local memo: with TWO graph-consuming analyzers (1.10), the second
+  // reuses the first's build within the SAME run — one parse per tsconfig
+  // even when persistent caching is disabled, and intra-run reuse never
+  // inflates the hit/miss counters (those report the persistent cache only).
+  // `acquire` is deliberately await-free end to end: the memo check, the
+  // synchronous persistent read, the build, and the memo store all happen in
+  // one frame, so concurrent analyzers cannot both observe a miss.
+  const graphMemo = new Map<string, ImportGraphBuildResult>();
   const graphCache: GraphCache = {
-    get(tsconfigPath) {
+    acquire(tsconfigPath, build) {
+      const memoized = graphMemo.get(tsconfigPath);
+      if (memoized !== undefined) return memoized;
       const key = graphKeys.get(tsconfigPath);
-      if (key === undefined || cache === undefined) return undefined;
-      const read = cache.get("graph", key, cachedGraphSchema);
-      if (read.hit) {
-        cacheStats.hits += 1;
-        return {
-          data: new ImportGraph(read.value.data.nodes, read.value.data.edges),
-          coverage: read.value.coverage,
-          attempted: read.value.attempted,
-          unresolved: read.value.unresolved,
-          unresolvedImports: read.value.unresolvedImports,
-          degraded: read.value.degraded,
-        };
+      if (key !== undefined && cache !== undefined) {
+        const read = cache.get("graph", key, cachedGraphSchema);
+        if (read.hit) {
+          cacheStats.hits += 1;
+          const result: ImportGraphBuildResult = {
+            data: new ImportGraph(read.value.data.nodes, read.value.data.edges),
+            coverage: read.value.coverage,
+            attempted: read.value.attempted,
+            unresolved: read.value.unresolved,
+            unresolvedImports: read.value.unresolvedImports,
+            degraded: read.value.degraded,
+          };
+          graphMemo.set(tsconfigPath, result);
+          return result;
+        }
+        if (read.invalid) {
+          cacheStats.invalid += 1;
+          cacheDegraded.push({
+            reason: "invalid cache entry (recomputed and overwritten)",
+            subject: `cache/graph/${path.relative(root.value, tsconfigPath).replaceAll("\\", "/")}`,
+          });
+        } else {
+          cacheStats.misses += 1;
+        }
       }
-      if (read.invalid) {
-        cacheStats.invalid += 1;
-        cacheDegraded.push({
-          reason: "invalid cache entry (recomputed and overwritten)",
-          subject: `cache/graph/${path.relative(root.value, tsconfigPath).replaceAll("\\", "/")}`,
-        });
-      } else {
-        cacheStats.misses += 1;
-      }
-      return undefined;
-    },
-    put(tsconfigPath, result) {
-      const key = graphKeys.get(tsconfigPath);
-      if (key === undefined || cache === undefined) return;
+      const result = build();
+      // Memoized unconditionally: a degraded or post-abort build is still
+      // THIS run's truth (only the persistent tier below refuses it).
+      graphMemo.set(tsconfigPath, result);
       // Cache hygiene (P2): never persist post-abort work, and never let a
       // degraded partial become a future "clean" hit.
-      if (controller.signal.aborted || result.degraded.length > 0) return;
-      cache.put("graph", key, {
-        data: result.data.toJSON(),
-        coverage: result.coverage,
-        attempted: result.attempted,
-        unresolved: result.unresolved,
-        unresolvedImports: result.unresolvedImports,
-        degraded: result.degraded,
-      });
+      if (
+        key !== undefined &&
+        cache !== undefined &&
+        !controller.signal.aborted &&
+        result.degraded.length === 0
+      ) {
+        cache.put("graph", key, {
+          data: result.data.toJSON(),
+          coverage: result.coverage,
+          attempted: result.attempted,
+          unresolved: result.unresolved,
+          unresolvedImports: result.unresolvedImports,
+          degraded: result.degraded,
+        });
+      }
+      return result;
     },
   };
   // Findings key (per axiom): graph keys + analyzable change hashes + scope
@@ -472,6 +496,7 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewRunRes
   // in-flight analyzer cannot mutate `settled` mid-aggregation.
   const findings: Finding[] = [];
   const runDegraded: Degradation[] = [...discovery.degraded];
+  const analyzerDegraded: [axiom: string, degradation: Degradation][] = [];
   for (const analyzer of analyzers) {
     const result = settled.get(analyzer.axiom);
     if (result === undefined) {
@@ -483,7 +508,27 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewRunRes
       continue;
     }
     findings.push(...result.findings);
-    runDegraded.push(...result.degraded);
+    for (const d of result.degraded) analyzerDegraded.push([analyzer.axiom, d]);
+  }
+  // CROSS-ANALYZER dedupe only: two graph-consuming analyzers (1.10) declare
+  // the SAME graph-build degradations — one event, one entry. A (reason,
+  // subject) pair repeated WITHIN one analyzer is repeated real events and
+  // every occurrence stays.
+  const axiomsByDegradation = new Map<string, Set<string>>();
+  for (const [axiom, d] of analyzerDegraded) {
+    const key = JSON.stringify([d.reason, d.subject]);
+    const axioms = axiomsByDegradation.get(key);
+    if (axioms === undefined) axiomsByDegradation.set(key, new Set([axiom]));
+    else axioms.add(axiom);
+  }
+  const crossEmitted = new Set<string>();
+  for (const [, d] of analyzerDegraded) {
+    const key = JSON.stringify([d.reason, d.subject]);
+    if (axiomsByDegradation.get(key)!.size > 1) {
+      if (crossEmitted.has(key)) continue;
+      crossEmitted.add(key);
+    }
+    runDegraded.push(d);
   }
   runDegraded.push(...cacheDegraded);
 

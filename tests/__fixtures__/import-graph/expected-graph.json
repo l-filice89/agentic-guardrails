@@ -44,7 +44,10 @@
       "dynamic": false,
       "typeOnly": false,
       "reExport": true,
-      "line": 2
+      "line": 2,
+      "names": [
+        "fromBarrel"
+      ]
     },
     {
       "from": "src/main.ts",
@@ -52,7 +55,10 @@
       "dynamic": false,
       "typeOnly": false,
       "reExport": false,
-      "line": 3
+      "line": 3,
+      "names": [
+        "aliased"
+      ]
     },
     {
       "from": "src/main.ts",
@@ -60,7 +66,10 @@
       "dynamic": false,
       "typeOnly": false,
       "reExport": false,
-      "line": 4
+      "line": 4,
+      "names": [
+        "fromBarrel"
+      ]
     },
     {
       "from": "src/main.ts",
@@ -68,7 +77,10 @@
       "dynamic": true,
       "typeOnly": false,
       "reExport": false,
-      "line": 11
+      "line": 11,
+      "names": [
+        "*"
+      ]
     },
     {
       "from": "src/main.ts",
@@ -76,7 +88,10 @@
       "dynamic": false,
       "typeOnly": true,
       "reExport": false,
-      "line": 7
+      "line": 7,
+      "names": [
+        "SomeType"
+      ]
     },
     {
       "from": "src/main.ts",
@@ -84,7 +99,10 @@
       "dynamic": false,
       "typeOnly": true,
       "reExport": false,
-      "line": 8
+      "line": 8,
+      "names": [
+        "OnlyInline"
+      ]
     },
     {
       "from": "src/main.ts",
@@ -92,7 +110,10 @@
       "dynamic": false,
       "typeOnly": false,
       "reExport": false,
-      "line": 2
+      "line": 2,
+      "names": [
+        "*"
+      ]
     },
     {
       "from": "src/main.ts",
@@ -100,7 +121,8 @@
       "dynamic": false,
       "typeOnly": false,
       "reExport": false,
-      "line": 6
+      "line": 6,
+      "names": []
     }
   ]
 }

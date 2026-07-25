@@ -12,9 +12,11 @@ import {
 import os from "node:os";
 import path from "node:path";
 
-import { computeFindingId, type Finding } from "@agentic-guardrails/contracts";
+import { computeFindingId, type Degradation, type Finding } from "@agentic-guardrails/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { ImportGraphBuildResult } from "../adapter/language-adapter.js";
+import { ImportGraph } from "../graph/import-graph.js";
 import { ENGINE_VERSION } from "./manifest.js";
 import { normalizeCacheTruth } from "./normalize-cache-truth.js";
 import {
@@ -642,24 +644,28 @@ describe("computeGraphKey toolchain invalidation (P5)", () => {
   });
 });
 
-describe("engine-version upgrade path (1.9)", () => {
+describe("engine-version upgrade path (1.9/1.10)", () => {
   it("pre-upgrade cache entries become clean key MISSES — never read, never invalid, no degradation", async () => {
     const cwd = tempRepoWithChange();
     const tsconfigPath = path.join(cwd, "tsconfig.json");
-    // The 1.9 payload-schema change (edge `line`, `unresolvedImports`) was
-    // paired with an ENGINE_VERSION bump: old entries live under old keys.
+    // Every cached-graph payload-schema change (1.9: edge `line` +
+    // `unresolvedImports`; 1.10: edge `names`) was paired with an
+    // ENGINE_VERSION bump: old entries live under old keys.
     expect(ENGINE_VERSION).not.toBe("0.0.1");
-    const oldKey = computeGraphKey(cwd, tsconfigPath, undefined, "0.0.1");
+    expect(ENGINE_VERSION).not.toBe("0.0.2");
     const newKey = computeGraphKey(cwd, tsconfigPath);
-    expect(oldKey).toBeDefined();
     expect(newKey).toBeDefined();
-    expect(newKey).not.toBe(oldKey);
-    // Plant a stale pre-upgrade entry under the OLD key: the post-upgrade
-    // run must never read it — a clean miss, not an "invalid entry"
-    // degradation implying corruption.
     const graphDir = path.join(cwd, "_agentic-guardrails", ".cache", "graph");
     mkdirSync(graphDir, { recursive: true });
-    writeFileSync(path.join(graphDir, `${oldKey}.json`), "{ stale pre-upgrade shape");
+    for (const oldVersion of ["0.0.1", "0.0.2"]) {
+      const oldKey = computeGraphKey(cwd, tsconfigPath, undefined, oldVersion);
+      expect(oldKey).toBeDefined();
+      expect(newKey).not.toBe(oldKey);
+      // Plant a stale pre-upgrade entry under the OLD key: the post-upgrade
+      // run must never read it — a clean miss, not an "invalid entry"
+      // degradation implying corruption.
+      writeFileSync(path.join(graphDir, `${oldKey}.json`), "{ stale pre-upgrade shape");
+    }
     const result = await runReview({ cwd }); // default analyzers — real graph build
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -694,6 +700,76 @@ describe("runReview assembly declaration (1.7)", () => {
     const phases = result.artifact.manifest.phases!;
     expect(phases).toHaveLength(6);
     expect(phases[1]!.members).toEqual(["axiom-2"]);
+  });
+});
+
+describe("runReview degradation aggregation (phase 4, 1.10)", () => {
+  const shared: Degradation = { reason: "graph build degraded", subject: "tsconfig.json" };
+
+  it("the SAME (reason, subject) pair from TWO analyzers collapses to one artifact entry", async () => {
+    const cwd = tempRepoWithChange();
+    const a: Analyzer = { axiom: "1", run: async () => ({ findings: [], degraded: [{ ...shared }] }) };
+    const b: Analyzer = { axiom: "3", run: async () => ({ findings: [], degraded: [{ ...shared }] }) };
+    const result = await runReview({ cwd, analyzers: [a, b] });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(
+      result.runDegraded.filter(
+        (d) => d.reason === shared.reason && d.subject === shared.subject,
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("HAZARD: the same pair emitted TWICE by ONE analyzer is two real events — both entries stay", async () => {
+    const cwd = tempRepoWithChange();
+    const repeat: Analyzer = {
+      axiom: "1",
+      run: async () => ({ findings: [], degraded: [{ ...shared }, { ...shared }] }),
+    };
+    const result = await runReview({ cwd, analyzers: [repeat] });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(
+      result.runDegraded.filter(
+        (d) => d.reason === shared.reason && d.subject === shared.subject,
+      ),
+    ).toHaveLength(2);
+  });
+});
+
+describe("runReview run-local graph memo (1.10)", () => {
+  it("two graph-consuming analyzers acquire ONE build per tsconfig, even across await points", async () => {
+    const cwd = tempRepoWithChange();
+    let builds = 0;
+    const emptyGraph = (): ImportGraphBuildResult => ({
+      data: new ImportGraph([], []),
+      coverage: 1,
+      attempted: 0,
+      unresolved: 0,
+      unresolvedImports: [],
+      degraded: [],
+    });
+    const acquiringAnalyzer = (axiom: string): Analyzer => ({
+      axiom,
+      run: async (context) => {
+        // Deliberate yield BEFORE acquiring: a memo that only stored results
+        // after an awaited build would let both analyzers race past the miss.
+        await new Promise((resolve) => setImmediate(resolve));
+        for (const tsconfigPath of context.tsconfigPaths) {
+          context.graphCache?.acquire(tsconfigPath, () => {
+            builds += 1;
+            return emptyGraph();
+          });
+        }
+        return { findings: [], degraded: [] };
+      },
+    });
+    const result = await runReview({
+      cwd,
+      analyzers: [acquiringAnalyzer("1"), acquiringAnalyzer("3")],
+    });
+    expect(result.ok).toBe(true);
+    expect(builds).toBe(1); // one tsconfig, one parse — the memo covers the second analyzer
   });
 });
 

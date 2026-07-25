@@ -76,7 +76,9 @@ function makeRepo(): string {
 function introduceCycle(dir: string): void {
   writeFileSync(
     path.join(dir, "src", "b.ts"),
-    'import { a } from "./a.js";\nexport const b = 1;\nexport const echo = a;\n',
+    // `echo` is deliberately NOT exported: an unused export would add an
+    // axiom-3 finding and mutate what this scenario tests (no config.yaml here).
+    'import { a } from "./a.js";\nexport const b = 1;\nconst echo = a;\n',
   );
 }
 
@@ -149,6 +151,7 @@ describe("guardrails review — config plane e2e", () => {
       pass: true,
       perAxiom: [
         { axiom: "1", enforcement: "advisory", errorFindings: 1, maxFindings: 0, pass: true },
+        { axiom: "3", enforcement: "blocking", errorFindings: 0, maxFindings: 0, pass: true },
         { axiom: "5", enforcement: "blocking", errorFindings: 0, maxFindings: 0, pass: true },
       ],
     });

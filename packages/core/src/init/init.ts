@@ -53,6 +53,7 @@ export const CORPUS_MAP_YAML = "schemaVersion: 1\nhumanConfirmed: []\n";
 /** One-line questionnaire descriptions per known axiom. */
 const AXIOM_DESCRIPTIONS: Record<string, string> = {
   "1": "structural/dependency direction",
+  "3": "cleanliness",
   "5": "security",
 };
 

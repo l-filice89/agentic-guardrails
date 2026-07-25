@@ -68,7 +68,9 @@ function makeRepoWithCycle(): string {
   git(dir, ["commit", "-m", "base"]);
   writeFileSync(
     path.join(dir, "src", "b.ts"),
-    'import { a } from "./a.js";\nexport const b = 1;\nexport const echo = a;\n',
+    // `echo` is deliberately NOT exported: an unused export would add an
+    // axiom-3 finding and mutate what this scenario tests (no config.yaml here).
+    'import { a } from "./a.js";\nexport const b = 1;\nconst echo = a;\n',
   );
   return dir;
 }
@@ -128,7 +130,7 @@ describe("guardrails review — pipeline hardening e2e (1.7)", () => {
     // Declared six-phase assembly: fixed shape, 2/3 empty-membership with why.
     const phases = second.artifact.manifest.phases!;
     expect(phases.map((p) => p.phase)).toEqual([0, 1, 2, 3, 4, 5]);
-    expect(phases[1]!.members).toEqual(["axiom-1"]);
+    expect(phases[1]!.members).toEqual(["axiom-1", "axiom-3"]);
     expect(phases[2]!.members).toEqual([]);
     expect(phases[2]!.reason).toContain("Epic 2");
     expect(phases[3]!.reason).toContain("Epic 3");
@@ -137,10 +139,13 @@ describe("guardrails review — pipeline hardening e2e (1.7)", () => {
   it("HAZARD: a corrupted cache entry still yields correct output plus a degradation note, and is overwritten", () => {
     const repo = makeRepoWithCycle();
     expect(runCli(repo).status).toBe(1);
+    // One per-axiom findings entry each for axiom 1 and axiom 3 (1.10).
     const entries = readdirSync(findingsCacheDir(repo));
-    expect(entries).toHaveLength(1);
+    expect(entries).toHaveLength(2);
     const entryPath = path.join(findingsCacheDir(repo), entries[0]!);
-    writeFileSync(entryPath, "{ torn garbage");
+    for (const entry of entries) {
+      writeFileSync(path.join(findingsCacheDir(repo), entry), "{ torn garbage");
+    }
 
     const result = runCli(repo);
     // Correct output survived: the cycle is still found and reported.
@@ -161,18 +166,20 @@ describe("guardrails review — pipeline hardening e2e (1.7)", () => {
     const repo = makeRepoWithCycle();
     expect(runCli(repo).status).toBe(1);
     const entries = readdirSync(findingsCacheDir(repo));
-    expect(entries).toHaveLength(1);
-    const entryPath = path.join(findingsCacheDir(repo), entries[0]!);
-    // The attacker copies the REAL entry's schema-valid shape but swaps the
+    expect(entries).toHaveLength(2);
+    // The attacker copies each REAL entry's schema-valid shape but swaps the
     // payload (here: "no findings" — hiding the cycle). The MAC no longer
     // matches, so the warm run must not serve it.
-    const envelope = JSON.parse(readFileSync(entryPath, "utf8")) as {
-      mac: string;
-      payload: { findings: unknown[]; degraded: unknown[] };
-    };
-    expect(envelope.mac).toMatch(/^[0-9a-f]{64}$/); // entries are MAC-authenticated
-    envelope.payload = { findings: [], degraded: [] };
-    writeFileSync(entryPath, `${JSON.stringify(envelope)}\n`);
+    for (const entry of entries) {
+      const entryPath = path.join(findingsCacheDir(repo), entry);
+      const envelope = JSON.parse(readFileSync(entryPath, "utf8")) as {
+        mac: string;
+        payload: { findings: unknown[]; degraded: unknown[] };
+      };
+      expect(envelope.mac).toMatch(/^[0-9a-f]{64}$/); // entries are MAC-authenticated
+      envelope.payload = { findings: [], degraded: [] };
+      writeFileSync(entryPath, `${JSON.stringify(envelope)}\n`);
+    }
 
     const result = runCli(repo);
     // The planted "clean" result was rejected: the cycle is still reported,

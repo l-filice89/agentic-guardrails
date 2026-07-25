@@ -31,6 +31,7 @@ describe("TypeScriptAdapter unit fixture", () => {
       typeOnly: false,
       reExport: false,
       line: 2,
+      names: ["*"],
     });
   });
 
@@ -42,6 +43,7 @@ describe("TypeScriptAdapter unit fixture", () => {
       typeOnly: false,
       reExport: false,
       line: 7,
+      names: ["*"],
     });
   });
 
@@ -61,6 +63,7 @@ describe("TypeScriptAdapter unit fixture", () => {
       typeOnly: true,
       reExport: false,
       line: 3,
+      names: ["Inline"],
     });
   });
 
@@ -73,6 +76,7 @@ describe("TypeScriptAdapter unit fixture", () => {
       typeOnly: false,
       reExport: false,
       line: 4,
+      names: ["outside"],
     });
     expect(result.degraded).toContainEqual({
       reason: "resolved outside project root",

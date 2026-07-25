@@ -172,11 +172,12 @@ export class TypeScriptAdapter implements LanguageAdapter {
       resolvedAbsolutePath: string | undefined,
       flags: EdgeFlags,
       line: number,
+      names: string[],
     ): void => {
       if (resolvedAbsolutePath === undefined && isNodeBuiltin(specifier)) {
         attempt(from, specifier, true);
         nodes.push({ file: specifier, external: true });
-        edges.push({ from, to: specifier, ...flags, line });
+        edges.push({ from, to: specifier, ...flags, line, names });
         return;
       }
       if (resolvedAbsolutePath !== undefined) {
@@ -185,7 +186,7 @@ export class TypeScriptAdapter implements LanguageAdapter {
           // Resolved into node_modules: a verified external package.
           attempt(from, specifier, true);
           nodes.push({ file: specifier, external: true });
-          edges.push({ from, to: specifier, ...flags, line });
+          edges.push({ from, to: specifier, ...flags, line, names });
           return;
         }
         if (path.isAbsolute(rel) || rel.startsWith("..")) {
@@ -193,12 +194,12 @@ export class TypeScriptAdapter implements LanguageAdapter {
           // the project root: external with the raw specifier + degraded.
           attempt(from, specifier, true);
           nodes.push({ file: specifier, external: true });
-          edges.push({ from, to: specifier, ...flags, line });
+          edges.push({ from, to: specifier, ...flags, line, names });
           degrade("resolved outside project root", `${from} -> ${specifier}`);
           return;
         }
         attempt(from, specifier, true);
-        edges.push({ from, to: rel, ...flags, line });
+        edges.push({ from, to: rel, ...flags, line, names });
         return;
       }
       attempt(from, specifier, false);
@@ -214,7 +215,7 @@ export class TypeScriptAdapter implements LanguageAdapter {
       // specifier matching a tsconfig `paths` pattern is a broken ALIAS —
       // that one also gets the unresolved-import record.
       nodes.push({ file: specifier, external: true });
-      edges.push({ from, to: specifier, ...flags, line });
+      edges.push({ from, to: specifier, ...flags, line, names });
       degrade("unresolved bare specifier", `${from} -> ${specifier}`);
       if (matchesPathsAlias(specifier, pathsPatterns)) {
         recordUnresolvedImport(from, specifier, line, flags.typeOnly);
@@ -231,6 +232,7 @@ export class TypeScriptAdapter implements LanguageAdapter {
           decl.getModuleSpecifierSourceFile()?.getFilePath(),
           { dynamic: false, typeOnly: isTypeOnlyImport(decl), reExport: false },
           decl.getStartLineNumber(),
+          importedNames(decl),
         );
       }
 
@@ -243,6 +245,11 @@ export class TypeScriptAdapter implements LanguageAdapter {
           decl.getModuleSpecifierSourceFile()?.getFilePath(),
           { dynamic: false, typeOnly: isTypeOnlyExport(decl), reExport: true },
           decl.getStartLineNumber(),
+          // `export * from` / `export * as ns from` re-export the WHOLE
+          // target namespace; named re-exports carry the TARGET-module names.
+          decl.getNamedExports().length === 0
+            ? ["*"]
+            : decl.getNamedExports().map((n) => n.getName()),
         );
       }
 
@@ -259,6 +266,7 @@ export class TypeScriptAdapter implements LanguageAdapter {
           resolveWithCompiler(project, sf, specifier),
           STATIC,
           decl.getStartLineNumber(),
+          ["*"], // `import x = require(...)` binds the whole namespace
         );
       }
 
@@ -279,6 +287,7 @@ export class TypeScriptAdapter implements LanguageAdapter {
             resolveWithCompiler(project, sf, specifier),
             { dynamic: isDynamicImport, typeOnly: false, reExport: false },
             call.getStartLineNumber(),
+            ["*"], // the whole module namespace is reachable from the call
           );
           continue;
         }
@@ -322,6 +331,18 @@ function isTypeOnlyImport(decl: ImportDeclaration): boolean {
     decl.getDefaultImport() === undefined &&
     decl.getNamespaceImport() === undefined
   );
+}
+
+/** Binding names an import declaration takes from its target: `"default"`
+ * for a default import, `"*"` for a namespace import, target-module names
+ * for named bindings (`import { a as b }` records `a`; type-only included —
+ * type usage counts as usage). A bare side-effect import records `[]`. */
+function importedNames(decl: ImportDeclaration): string[] {
+  const names: string[] = [];
+  if (decl.getDefaultImport() !== undefined) names.push("default");
+  if (decl.getNamespaceImport() !== undefined) names.push("*");
+  for (const named of decl.getNamedImports()) names.push(named.getName());
+  return names;
 }
 
 /** Same inline-modifier logic for `export { type X } from "..."`. */

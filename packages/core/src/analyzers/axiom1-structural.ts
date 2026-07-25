@@ -49,9 +49,10 @@ const RULE_DIRECTION = "structural/dependency-direction";
 const RULE_UNASSIGNED = "structural/unassigned-file";
 
 /** Case-insensitive filesystems (win32/darwin): git paths and graph paths
- * may disagree in case for the same file — fold before membership compares. */
+ * may disagree in case for the same file — fold before membership compares.
+ * Exported for the axiom-3 analyzer (same convention, one implementation). */
 const CASE_INSENSITIVE = process.platform === "win32" || process.platform === "darwin";
-function foldCase(p: string): string {
+export function foldCase(p: string): string {
   return CASE_INSENSITIVE ? p.toLowerCase() : p;
 }
 
@@ -129,14 +130,14 @@ export const axiom1Structural: Analyzer = {
     const adapter = new TypeScriptAdapter();
     // Graph builds route through the content-addressed cache when the
     // pipeline wires one in (1.7) — a hit skips the ts-morph parse entirely.
+    const build = (tsconfigPath: string) =>
+      adapter.buildImportGraph({ tsconfigPath, rootDir: context.repoRoot });
     const graphResult = mergeGraphResults(
-      context.tsconfigPaths.map((tsconfigPath) => {
-        const cached = context.graphCache?.get(tsconfigPath);
-        if (cached !== undefined) return cached;
-        const built = adapter.buildImportGraph({ tsconfigPath, rootDir: context.repoRoot });
-        context.graphCache?.put(tsconfigPath, built);
-        return built;
-      }),
+      context.tsconfigPaths.map(
+        (tsconfigPath) =>
+          context.graphCache?.acquire(tsconfigPath, () => build(tsconfigPath)) ??
+          build(tsconfigPath),
+      ),
     );
     const graph = graphResult.data;
     const degraded: Degradation[] = [...graphResult.degraded];

@@ -80,7 +80,9 @@ function makeRepo(): string {
 function introduceCycle(dir: string): void {
   writeFileSync(
     path.join(dir, "src", "b.ts"),
-    'import { a } from "./a.js";\nexport const b = 1;\nexport const echo = a;\n',
+    // `echo` is deliberately NOT exported: an unused export would add an
+    // axiom-3 finding and mutate what this scenario tests (no config.yaml here).
+    'import { a } from "./a.js";\nexport const b = 1;\nconst echo = a;\n',
   );
 }
 
@@ -221,7 +223,9 @@ describe("guardrails review — walking skeleton e2e", () => {
     // Uncommitted cycle inside the REFERENCED project.
     writeFileSync(
       path.join(dir, "pkg", "src", "b.ts"),
-      'import { a } from "./a.js";\nexport const b = 1;\nexport const echo = a;\n',
+      // `echo` is deliberately NOT exported: an unused export would add an
+      // axiom-3 finding and mutate what this scenario tests (no config.yaml here).
+      'import { a } from "./a.js";\nexport const b = 1;\nconst echo = a;\n',
     );
 
     const result = runCli(dir);

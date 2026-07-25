@@ -1,0 +1,66 @@
+[
+  {
+    "findingId": "0a01cc04e88756958cc1ec86b313e54b33bdcb25d4fe99c6b9d60988f0bc091a",
+    "axiom": "3",
+    "ruleId": "cleanliness/excessive-complexity",
+    "location": {
+      "file": "src/complex.ts",
+      "startLine": 2,
+      "endLine": 2
+    },
+    "message": "excessive cyclomatic complexity: 16 > 15 (threshold) — split `decide` into smaller units",
+    "tier": "deterministic",
+    "source": "ast",
+    "confidence": 1,
+    "severity": "warning",
+    "enclosingSymbol": "decide"
+  },
+  {
+    "findingId": "a973b6cd83f0caa1b8d161e5cd7ef6f56b1565a39fd16fa081528959ff096830",
+    "axiom": "3",
+    "ruleId": "cleanliness/duplicate-code",
+    "location": {
+      "file": "src/dup-b.ts",
+      "startLine": 2,
+      "endLine": 2
+    },
+    "message": "duplicate code: function body structurally identical to src/dup-a.ts:2 (identifiers/literals normalized) — extract the shared implementation",
+    "tier": "deterministic",
+    "source": "ast",
+    "confidence": 1,
+    "severity": "warning",
+    "enclosingSymbol": "e1edd2757f67cb76a4f62873c26e414a4f8f6d05b35f47316bdc7df089ad9d4c:src/dup-a.ts:src/dup-b.ts"
+  },
+  {
+    "findingId": "5963e6c47d7085af475394c387e0cf0dc85f8e1086468d66d493124fe65491e9",
+    "axiom": "3",
+    "ruleId": "cleanliness/unreachable-code",
+    "location": {
+      "file": "src/unreachable.ts",
+      "startLine": 5,
+      "endLine": 5
+    },
+    "message": "unreachable code: statements after a `return` in the same block can never execute",
+    "tier": "deterministic",
+    "source": "ast",
+    "confidence": 1,
+    "severity": "error",
+    "enclosingSymbol": "compute#block-0"
+  },
+  {
+    "findingId": "00111f369ebe48fd656e7fb1dd057dd144ac8dd3a230c4d827ab561fc5bb2101",
+    "axiom": "3",
+    "ruleId": "cleanliness/unused-export",
+    "location": {
+      "file": "src/unused.ts",
+      "startLine": 3,
+      "endLine": 3
+    },
+    "message": "unused export: no file in the analyzed project imports `orphan` by name — remove the export or the symbol",
+    "tier": "deterministic",
+    "source": "ast",
+    "confidence": 1,
+    "severity": "warning",
+    "enclosingSymbol": "orphan"
+  }
+]

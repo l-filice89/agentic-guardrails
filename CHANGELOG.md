@@ -10,6 +10,31 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Axiom #3 cleanliness analyzer (Story 1.10, `rulesetVersion: 3`,
+  `engineVersion: 0.0.3`, documented in `docs/rules/axiom-3-cleanliness.md`):
+  a second registered deterministic analyzer with four AST-tier rules over
+  changed files — `cleanliness/unreachable-code` (error — statements after a
+  terminal `return`/`throw`/`break`/`continue` in the same block),
+  `cleanliness/unused-export` (warning — an exported symbol in a changed
+  file that no project file imports by name; namespace/`export *`/dynamic
+  importers count as using all exports, `export default` tracked as
+  "default", type-only usage counts, and zero-importer files are exempt
+  entirely as indistinguishable from entry points),
+  `cleanliness/duplicate-code` (warning — two ≥5-statement function-like
+  bodies among the changed files with identical normalized structure,
+  identifiers/literals folded; one finding per pair at the later occurrence
+  naming the original), and `cleanliness/excessive-complexity` (warning —
+  cyclomatic complexity > 15 per function-like, threshold hardcoded with
+  rationale). Import-graph edges now carry the per-edge imported binding
+  `names` (`*` for whole-namespace usage, `default` for default imports;
+  unioned across deduped same-identity edges) — the usage substrate that
+  makes unused-export graph-cheap. The cached-graph payload schema change
+  is paired with the ENGINE_VERSION bump so pre-1.10 cache entries become
+  clean key misses, never corruption-flavored degradations. Within one run
+  the graph build is shared between the two analyzers via a run-local memo
+  (one parse per tsconfig; intra-run reuse never inflates the persistent
+  hit/miss counters), and identical graph-build degradations declared by
+  both analyzers are deduplicated at aggregation.
 - Axiom #1 full structural rule set (Story 1.9, `rulesetVersion: 2`,
   documented in `docs/rules/axiom-1-structural.md`): import-graph edges now
   carry the 1-based import-statement `line` (dynamic imports: the call

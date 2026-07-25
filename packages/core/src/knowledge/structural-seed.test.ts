@@ -11,9 +11,9 @@ function buildResult(): ImportGraphBuildResult {
     { file: "src/a.ts", external: false },
   ];
   const edges = [
-    { from: "src/a.ts", to: "src/b.ts", dynamic: false, typeOnly: false, reExport: false, line: 1 },
-    { from: "src/b.ts", to: "zod", dynamic: false, typeOnly: false, reExport: false, line: 2 },
-    { from: "src/a.ts", to: "zod", dynamic: false, typeOnly: false, reExport: false, line: 2 },
+    { from: "src/a.ts", to: "src/b.ts", dynamic: false, typeOnly: false, reExport: false, line: 1, names: [] },
+    { from: "src/b.ts", to: "zod", dynamic: false, typeOnly: false, reExport: false, line: 2, names: [] },
+    { from: "src/a.ts", to: "zod", dynamic: false, typeOnly: false, reExport: false, line: 2, names: [] },
   ];
   return {
     data: new ImportGraph(nodes, edges),

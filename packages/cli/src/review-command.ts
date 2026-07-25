@@ -18,6 +18,7 @@ import {
  * — an axiom with zero findings of its lead rule must still label correctly). */
 const AXIOM_CATEGORY: Record<string, string> = {
   "1": "structural",
+  "3": "cleanliness",
 };
 
 export async function reviewCommand(cwd: string): Promise<number> {

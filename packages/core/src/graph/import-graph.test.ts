@@ -5,7 +5,13 @@ import { ImportGraph, normalizePath } from "./import-graph.js";
 const edge = (
   from: string,
   to: string,
-  flags?: Partial<{ dynamic: boolean; typeOnly: boolean; reExport: boolean; line: number }>,
+  flags?: Partial<{
+    dynamic: boolean;
+    typeOnly: boolean;
+    reExport: boolean;
+    line: number;
+    names: string[];
+  }>,
 ) => ({
   from,
   to,
@@ -13,6 +19,7 @@ const edge = (
   typeOnly: false,
   reExport: false,
   line: 1,
+  names: [],
   ...flags,
 });
 
@@ -76,12 +83,28 @@ describe("ImportGraph determinism", () => {
     expect(g.edges).toHaveLength(1);
     expect(g.edges[0]!.line).toBe(1);
     expect(g.fanIn("b.ts").data.count).toBe(1);
+    expect(g.edges[0]!.names).toEqual([]);
     // Differently-flagged edges keep their own identity (and line).
     const h = new ImportGraph(
       [{ file: "a.ts", external: false }, { file: "b.ts", external: false }],
       [edge("a.ts", "b.ts", { line: 5 }), edge("a.ts", "b.ts", { typeOnly: true, line: 3 })],
     );
     expect(h.edges).toHaveLength(2);
+  });
+
+  it("unions binding names across deduped same-identity edges, sorted + unique (1.10)", () => {
+    // Names are NOT part of edge identity — two imports of the same target
+    // merge to one edge carrying the union of their bindings.
+    const g = new ImportGraph(
+      [{ file: "a.ts", external: false }, { file: "b.ts", external: false }],
+      [
+        edge("a.ts", "b.ts", { line: 5, names: ["zeta", "alpha"] }),
+        edge("a.ts", "b.ts", { line: 1, names: ["alpha", "default"] }),
+      ],
+    );
+    expect(g.edges).toHaveLength(1);
+    expect(g.edges[0]!.line).toBe(1);
+    expect(g.edges[0]!.names).toEqual(["alpha", "default", "zeta"]);
   });
 
   it("dedupes nodes after separator normalization", () => {
