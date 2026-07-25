@@ -16,7 +16,17 @@ export const runManifestSchema = z
   .strictObject({
     schemaVersion: z.int().min(1),
     ledgerHash: z.string().min(1),
+    /** sha256 of the COMMITTED `_agentic-guardrails/corpus-map.yaml` bytes
+     * (1.8) — the human-curated corpus baseline. NOT the structural corpus
+     * seed axiom 6 judges against: see `corpusSeedHash`. */
     corpusHash: z.string().min(1),
+    /** sha256 of the derived structural corpus seed
+     * (`_agentic-guardrails/.cache/corpus/structural-seed.json`, 1.8) — the
+     * corpus axiom-6 conformance findings were actually measured against, so
+     * they are reproducible from the manifest. Distinct from `corpusHash`
+     * (the committed corpus-map.yaml). Present only when the seed was read;
+     * absent means no seed existed for this run. */
+    corpusSeedHash: z.string().min(1).optional(),
     rulesetVersion: z.string().min(1),
     tierEnablement: z.strictObject({
       deterministic: z.boolean(),

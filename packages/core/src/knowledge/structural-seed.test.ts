@@ -1,3 +1,4 @@
+import { structuralSeedSchema } from "@agentic-guardrails/contracts";
 import { describe, expect, it } from "vitest";
 
 import type { ImportGraphBuildResult } from "../adapter/language-adapter.js";
@@ -52,5 +53,13 @@ describe("buildStructuralSeed", () => {
     expect(first).toBe(second);
     expect(first.endsWith("\n")).toBe(true);
     expect(JSON.parse(first)).toMatchObject({ schemaVersion: 1 });
+  });
+
+  it("PRODUCER/CONSUMER coupling: the emitted bytes validate against the contracts schema", () => {
+    // 1.13's axiom-6 analyzer reads the seed through `structuralSeedSchema`
+    // and treats a parse failure as `no_corpus` — a producer change that
+    // drifts from the schema would silently disable the whole axiom.
+    const raw: unknown = JSON.parse(serializeStructuralSeed(buildStructuralSeed(buildResult())));
+    expect(structuralSeedSchema.safeParse(raw).success).toBe(true);
   });
 });

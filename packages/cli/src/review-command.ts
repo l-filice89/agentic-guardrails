@@ -23,6 +23,7 @@ export const AXIOM_CATEGORY: Record<string, string> = {
   "3": "cleanliness",
   "4": "nfr",
   "5": "security",
+  "6": "conformance",
 };
 
 export async function reviewCommand(cwd: string): Promise<number> {
@@ -76,6 +77,14 @@ export async function reviewCommand(cwd: string): Promise<number> {
       .relative(result.repoRoot, artifactPath)
       .replaceAll("\\", "/");
     process.stdout.write(formatSummary(result.artifact, relativePath, result.runDegraded));
+
+    // Zero SILENT degradation, second half: an axiom that declined to run is
+    // inconclusive, not clean. These never touch the exit code (that is what
+    // "declared only" means), but an inconclusive run must never print the
+    // same thing a clean one prints.
+    for (const d of result.declaredOnly) {
+      process.stderr.write(`guardrails review: inconclusive: ${d.reason} (${d.subject})\n`);
+    }
 
     if (result.degradedRun) {
       // Zero-SILENT-degradation: every reason is printed, one line each.

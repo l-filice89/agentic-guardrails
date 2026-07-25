@@ -191,10 +191,13 @@ describe("guardrails review — axiom-5 security rule set e2e (Story 1.12)", () 
     expect(warm.status).toBe(0);
     const second = readSingleArtifact(repo);
     // EXACT counter shape: one findings hit per registered analyzer (axioms
-    // 1, 3, 4, 5), no graph acquisition (every analyzer was served whole),
-    // no misses, no invalid entries.
+    // 1, 3, 4, 5, 6), no graph acquisition (each was served whole), no
+    // misses. Axiom 6 is cacheable even in this un-inited fixture: an absent
+    // corpus seed is a DECLARATION, not a degradation, and the seed's
+    // "absent" sentinel is part of its cache key — a later `guardrails init`
+    // changes the key rather than serving a stale no-corpus result.
     expect((second.artifact["manifest"] as Record<string, unknown>)["cache"]).toEqual({
-      hits: 4,
+      hits: 5,
       misses: 0,
       invalid: 0,
     });

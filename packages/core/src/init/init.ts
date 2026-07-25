@@ -56,6 +56,7 @@ const AXIOM_DESCRIPTIONS: Record<string, string> = {
   "3": "cleanliness",
   "4": "nfr: sync I/O, unbounded fan-out, cancellation",
   "5": "security",
+  "6": "conformance: naming, placement, module shape",
 };
 
 /** Questionnaire seam: the CLI passes a `node:readline/promises`-backed

@@ -184,7 +184,18 @@ The v2 runtime lives in a pnpm-workspaces monorepo under `packages/`:
   string `setTimeout`/`setInterval`, `vm`), and unsafe deserialization
   (`node-serialize` `unserialize`, `v8.deserialize`); errors only where
   near-certain — FR-32 names axiom 5 as the gate-critical axiom and its rules
-  are error-dense, see `docs/rules/axiom-5-security.md`) → aggregation
+  are error-dense, see `docs/rules/axiom-5-security.md`; and the Axiom #6
+  conformance rule set — off-convention file naming, misplaced file kinds and
+  minority module shape, judged against the persisted structural corpus seed
+  `guardrails init` derives. A convention fires ONLY when the corpus confirms
+  it: ≥10 samples in the nearest qualifying directory scope AND ≥80%
+  dominance. A file is judged on naming and placement only where its path is
+  NEW to the corpus, and every message cites measured counts, e.g. `kebab-case
+  in 12/12 named files under src/core`. All warnings by design; an absent seed
+  is inconclusive rather than clean — zero findings plus one declared
+  degradation that is printed but never drives exit 2, while a corrupt seed
+  degrades the run like any other lost coverage. See
+  `docs/rules/axiom-6-conformance.md`) → aggregation
   (overlapping same-file/same-axiom findings merged per FR-21: >50%-of-the-
   smaller-range overlap, strongest severity, source union, both messages
   preserved) → composition. Unchanged inputs are served from a

@@ -23,12 +23,13 @@ import type { Degradation, RunManifest } from "@agentic-guardrails/contracts";
 // `names` — the unused-export usage substrate); same clean-miss rationale.
 export const ENGINE_VERSION = "0.0.3";
 
-/** Version of the deterministic ruleset ("5": Story 1.12 adds the four-rule
- * axiom-5 security set — regex + AST tiers — alongside the 1.9 axiom-1,
- * 1.10 axiom-3, and 1.11 axiom-4 sets). ENGINE_VERSION stays at 0.0.3 on
- * purpose: 1.12 changes no cached payload schema — RULESET_VERSION alone
- * invalidates the findings cache. */
-export const RULESET_VERSION = "5";
+/** Version of the deterministic ruleset ("6": Story 1.13 adds the three-rule
+ * axiom-6 conformance set — prevalence-gated over the 1.8 structural corpus
+ * seed — alongside the 1.9 axiom-1, 1.10 axiom-3, 1.11 axiom-4, and 1.12
+ * axiom-5 sets). ENGINE_VERSION stays at 0.0.3 on purpose: 1.13 changes no
+ * cached payload schema — RULESET_VERSION alone invalidates the findings
+ * cache. */
+export const RULESET_VERSION = "6";
 
 /** sha256 of the empty string — the sentinel for "this input does not exist yet". */
 export const ABSENT_SHA256 = createHash("sha256").update("").digest("hex");
@@ -60,8 +61,15 @@ export interface BuildRunManifestOptions {
    * absent-file sentinel plus its degraded entry. */
   ledgerHash?: string;
   /** sha256 hex of committed corpus-map.yaml bytes (1.8); omitted → the
-   * absent-file sentinel plus its degraded entry. */
+   * absent-file sentinel plus its degraded entry. NOT the structural corpus
+   * seed — see `corpusSeedHash`. */
   corpusHash?: string;
+  /** sha256 hex of the DERIVED structural corpus seed bytes (1.8's
+   * `.cache/corpus/structural-seed.json`) — the corpus axiom 6 judged
+   * against, recorded so its findings are reproducible from the manifest.
+   * Omitted when no seed was read (no sentinel: absence is already declared
+   * by axiom 6's own degradation). */
+  corpusSeedHash?: string;
 }
 
 export function buildRunManifest(options: BuildRunManifestOptions = {}): BuiltManifest {
@@ -71,6 +79,7 @@ export function buildRunManifest(options: BuildRunManifestOptions = {}): BuiltMa
     schemaVersion: 1,
     ledgerHash: options.ledgerHash ?? ABSENT_SHA256,
     corpusHash: options.corpusHash ?? ABSENT_SHA256,
+    ...(options.corpusSeedHash === undefined ? {} : { corpusSeedHash: options.corpusSeedHash }),
     rulesetVersion: RULESET_VERSION,
     tierEnablement: { deterministic: true, llm: false },
     engineVersion: ENGINE_VERSION,

@@ -9,27 +9,17 @@
  * Carries the partial-result envelope (coverage + degraded) from the graph
  * build — never a silently partial seed.
  */
-import type { Degradation } from "@agentic-guardrails/contracts";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+
+import type { StructuralSeed } from "@agentic-guardrails/contracts";
 
 import type { ImportGraphBuildResult } from "../adapter/language-adapter.js";
 
-export interface StructuralSeedEntity {
-  /** Repo-relative `/`-separated path (or bare specifier for externals). */
-  file: string;
-  /** Number of distinct import edges pointing at this file. */
-  fanIn: number;
-  /** true → an external package specifier (e.g. "zod"), not a repo file —
-   * carried from the graph node so consumers can tell them apart. */
-  external: boolean;
-}
-
-export interface StructuralSeed {
-  schemaVersion: 1;
-  /** Sorted by file (the graph's canonical node order). */
-  entities: StructuralSeedEntity[];
-  coverage: number;
-  degraded: Degradation[];
-}
+// The shape lives in contracts (`structuralSeedSchema`, 1.13) so producer and
+// consumer validate against ONE definition — re-exported here because the
+// producer is this module.
+export type { StructuralSeed, StructuralSeedEntity } from "@agentic-guardrails/contracts";
 
 /** Repo-relative path of the seed file. */
 export const STRUCTURAL_SEED_PATH = "_agentic-guardrails/.cache/corpus/structural-seed.json";
@@ -57,6 +47,34 @@ export function buildStructuralSeed(graphResult: ImportGraphBuildResult): Struct
 
 function compare(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/**
+ * One read of the persisted seed BYTES. The pipeline reads it exactly once
+ * per run and hands the same buffer to both the cache key and the analyzer
+ * (`AnalyzerContext.corpusSeed`), so a concurrent `guardrails init` can never
+ * slip a new corpus between key computation and analysis. Absence is
+ * distinguished from every other failure: it is the only case an un-inited
+ * repo produces, and the only one the exit code is carved out for.
+ */
+export type StructuralSeedRead =
+  | { ok: true; bytes: Buffer }
+  | { ok: false; absent: boolean; message: string };
+
+export function readStructuralSeedFile(root: string): StructuralSeedRead {
+  try {
+    return { ok: true, bytes: readFileSync(path.join(root, STRUCTURAL_SEED_PATH)) };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return {
+        ok: false,
+        absent: true,
+        message: `seed file absent at ${STRUCTURAL_SEED_PATH} — run \`guardrails init\` to derive the structural corpus`,
+      };
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    return { ok: false, absent: false, message: `seed unreadable: ${message.split("\n")[0]}` };
+  }
 }
 
 /** Canonical bytes: 2-space JSON, fixed key order, one trailing newline. */

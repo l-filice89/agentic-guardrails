@@ -272,9 +272,11 @@ describe("checkGitWiring (preflight predicate)", () => {
 describe("runInit — questionnaire (answer → yaml mapping)", () => {
   it("maps answers to config.yaml entries sourced from contracts enum values", async () => {
     const dir = makeRepo();
-    // Axiom order is ["1", "3", "4", "5"]: axiom 1 → advisory (no maxFindings
-    // asked); axioms 3 and 4 → all-default (blocking + default maxFindings,
-    // two prompts each); axiom 5 → blocking with maxFindings 2.
+    // Axiom order is ["1", "3", "4", "5", "6"]: axiom 1 → advisory (no
+    // maxFindings asked); axioms 3 and 4 → all-default (blocking + default
+    // maxFindings, two prompts each); axiom 5 → blocking with maxFindings 2;
+    // axiom 6 → unanswered, so all-default (the script runs dry and every
+    // remaining prompt reads as empty).
     const io = scriptedIo(["advisory", "", "", "", "", "blocking", "2"]);
     const result = await runInit({ cwd: dir, noInput: false, io });
     expect(result.ok).toBe(true);

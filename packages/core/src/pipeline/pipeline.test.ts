@@ -16,7 +16,9 @@ import { computeFindingId, type Degradation, type Finding } from "@agentic-guard
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ImportGraphBuildResult } from "../adapter/language-adapter.js";
+import { axiom6Conformance, NO_CORPUS_PREFIX } from "../analyzers/axiom6-conformance.js";
 import { ImportGraph } from "../graph/import-graph.js";
+import { STRUCTURAL_SEED_PATH } from "../knowledge/structural-seed.js";
 import { ENGINE_VERSION } from "./manifest.js";
 import { normalizeCacheTruth } from "./normalize-cache-truth.js";
 import {
@@ -121,6 +123,95 @@ describe("runReview per-axiom isolation (phase 1)", () => {
       reason: "analyzer crashed: boom",
       subject: "axiom-99",
     });
+  });
+
+  it("an ABSENT corpus seed is DECLARED in the artifact but never drives exit 2 (the 1.13 carve-out)", async () => {
+    const cwd = tempRepoWithChange();
+    // The real analyzer against an un-inited repo: no seed file on disk.
+    const result = await runReview({ cwd, analyzers: [axiom6Conformance] });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.artifact.findings).toEqual([]);
+    // Half 1: declared in the persisted artifact, reason + subject intact,
+    // and surfaced on the result so the CLI can print it.
+    const declared = result.artifact.degraded.filter((d) =>
+      d.reason.startsWith(NO_CORPUS_PREFIX),
+    );
+    expect(declared).toHaveLength(1);
+    expect(declared[0]!.subject).toBe("corpus-seed");
+    expect(result.declaredOnly).toEqual(declared);
+    // Half 2: it is NOT in runDegraded, so it cannot drive the CLI to exit 2.
+    expect(result.runDegraded).toEqual([]);
+    expect(result.degradedRun).toBe(false);
+    // No seed read → no corpusSeedHash claimed in the manifest.
+    expect(result.artifact.manifest.corpusSeedHash).toBeUndefined();
+    // A REAL degradation next door is still counted — the carve-out is
+    // narrow, not a hole in degradation dominance.
+    const withCrash = await runReview({ cwd, analyzers: [axiom6Conformance, crashingAnalyzer] });
+    expect(withCrash.ok).toBe(true);
+    if (!withCrash.ok) return;
+    expect(withCrash.degradedRun).toBe(true);
+    expect(withCrash.runDegraded).toEqual([
+      { reason: "analyzer crashed: boom", subject: "axiom-99" },
+    ]);
+  });
+
+  it("a PRESENT-but-broken corpus seed is a real degradation: it counts and drives exit 2", async () => {
+    // The carve-out is for absence only. A corrupt, unreadable, invalid or
+    // empty seed silently disabling an entire axiom is exactly the kind of
+    // thing degradation dominance exists to surface.
+    const cases: [name: string, bytes: string][] = [
+      ["unparseable", '{ "schemaVersion": 1, "entities": ['],
+      ["schema-invalid", JSON.stringify({ schemaVersion: 2, entities: [], coverage: 1, degraded: [] })],
+      ["empty", JSON.stringify({ schemaVersion: 1, entities: [], coverage: 1, degraded: [] })],
+    ];
+    for (const [, bytes] of cases) {
+      const cwd = tempRepoWithChange();
+      const seedPath = path.join(cwd, STRUCTURAL_SEED_PATH);
+      mkdirSync(path.dirname(seedPath), { recursive: true });
+      writeFileSync(seedPath, `${bytes}\n`);
+      const result = await runReview({ cwd, analyzers: [axiom6Conformance] });
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.declaredOnly).toEqual([]);
+      expect(result.runDegraded.filter((d) => d.subject === "corpus-seed")).toHaveLength(1);
+      expect(result.degradedRun).toBe(true);
+      // The seed WAS read, so the manifest records which corpus it was.
+      expect(result.artifact.manifest.corpusSeedHash).toMatch(/^[0-9a-f]{64}$/);
+    }
+  });
+
+  it("the artifact's degraded array is deterministically ordered across sentinels, declarations and real degradations", async () => {
+    const cwd = tempRepoWithChange();
+    const noisy: Analyzer = {
+      axiom: "2",
+      run: async () => ({
+        findings: [],
+        degraded: [{ reason: "z-real", subject: "z-subject" }],
+        declaredOnly: [
+          { reason: "b-declared", subject: "b-subject" },
+          { reason: "a-declared", subject: "a-subject" },
+        ],
+      }),
+    };
+    const result = await runReview({ cwd, analyzers: [axiom6Conformance, noisy] });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // Declarations sorted by (subject, reason) like every sibling list — an
+    // analyzer's map insertion order must never reach the artifact bytes.
+    expect(result.declaredOnly.map((d) => d.subject)).toEqual([
+      "a-subject",
+      "b-subject",
+      "corpus-seed",
+    ]);
+    expect(result.artifact.degraded.map((d) => d.subject)).toEqual([
+      "ledger",
+      "corpus",
+      "a-subject",
+      "b-subject",
+      "corpus-seed",
+      "z-subject",
+    ]);
   });
 
   it("a clean run is not degraded despite the ledger/corpus sentinels", async () => {

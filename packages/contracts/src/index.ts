@@ -16,4 +16,5 @@ export * from "./migration.js";
 export * from "./partial-result.js";
 export * from "./review-artifact.js";
 export * from "./run-manifest.js";
+export * from "./structural-seed.js";
 export * from "./trend-record.js";

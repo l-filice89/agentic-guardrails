@@ -17,6 +17,7 @@ export * from "./analyzers/axiom1-structural.js";
 export * from "./analyzers/axiom3-cleanliness.js";
 export * from "./analyzers/axiom4-nfr.js";
 export * from "./analyzers/axiom5-security.js";
+export * from "./analyzers/axiom6-conformance.js";
 export * from "./cache/deterministic-cache.js";
 export * from "./config/config-loader.js";
 export * from "./git/git.js";

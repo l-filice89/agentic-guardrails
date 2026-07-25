@@ -57,12 +57,17 @@ import { axiom1Structural } from "../analyzers/axiom1-structural.js";
 import { axiom3Cleanliness } from "../analyzers/axiom3-cleanliness.js";
 import { axiom4Nfr } from "../analyzers/axiom4-nfr.js";
 import { axiom5Security } from "../analyzers/axiom5-security.js";
+import { axiom6Conformance } from "../analyzers/axiom6-conformance.js";
 import type { ChangedFilesCache, ChangedFilesParse } from "../analyzers/changed-files.js";
 import { DeterministicCache, loadCacheSecret } from "../cache/deterministic-cache.js";
 import { evaluateGate, loadConfig, type GateResult } from "../config/config-loader.js";
 import { fileGitStatus, headSha, repoRoot, uncommittedFiles } from "../git/git.js";
 import { ImportGraph } from "../graph/import-graph.js";
 import { checkGitWiring } from "../init/wiring.js";
+import {
+  readStructuralSeedFile,
+  type StructuralSeedRead,
+} from "../knowledge/structural-seed.js";
 import {
   ABSENT_SHA256,
   buildRunManifest,
@@ -90,6 +95,7 @@ export const PHASE1_BUDGET_MS = 30_000;
 const cachedAnalyzerResultSchema = z.strictObject({
   findings: z.array(findingSchema),
   degraded: z.array(degradationSchema),
+  declaredOnly: z.array(degradationSchema).optional(),
 });
 
 /** Cached serialized import-graph build result (per tsconfig). */
@@ -144,11 +150,24 @@ export interface AnalyzerContext {
    * cancellation. Honest caveat: current analyzers are synchronous and only
    * check between units — an in-flight unit runs to completion. */
   signal?: AbortSignal;
+  /** Optional (absent in bare unit-test contexts): the ONE read of the
+   * structural corpus seed's bytes (1.8/1.13). Read once in preflight and
+   * hashed into axiom 6's cache key from the SAME buffer, so a concurrent
+   * `guardrails init` cannot slip a new corpus between key computation and
+   * analysis. Absent from the context → the analyzer reads the file itself. */
+  corpusSeed?: StructuralSeedRead;
 }
 
 export interface AnalyzerResult {
   findings: Finding[];
   degraded: Degradation[];
+  /** Degradations this analyzer DECLARES as exit-neutral: real information
+   * for the artifact, but not evidence that this run lost coverage — the
+   * "absent until init" class (1.8's ledger sentinels, 1.13's absent corpus
+   * seed). The pipeline never inspects reasons to decide this; the analyzer
+   * that produced the degradation says so. Everything in `degraded` counts
+   * toward `runDegraded` and exit 2, without exception. */
+  declaredOnly?: Degradation[];
 }
 
 /** One registered deterministic analyzer. Plain array registry — no plugin
@@ -164,6 +183,7 @@ export const DEFAULT_ANALYZERS: readonly Analyzer[] = [
   axiom3Cleanliness,
   axiom4Nfr,
   axiom5Security,
+  axiom6Conformance,
 ];
 
 /** Axiom ids the pipeline treats as known BEYOND the registered analyzers.
@@ -190,9 +210,15 @@ export type ReviewRunResult =
       /** Canonical bytes: 2-space JSON, fixed key order, one trailing newline. */
       artifactJson: string;
       /** Degradations from THIS run's execution (analyzer crashes, coverage
-       * gaps) — excludes the always-present ledger/corpus sentinels, so the
-       * baseline pre-1.8 state does not flag every run as degraded. */
+       * gaps) — excludes the "absent until init" declarations (the 1.8
+       * ledger/corpus sentinels and whatever an analyzer returns in
+       * `AnalyzerResult.declaredOnly`), so an un-inited repo does not flag
+       * every run as degraded. Those stay declared in `artifact.degraded`. */
       runDegraded: Degradation[];
+      /** The exit-neutral declarations analyzers made this run (sorted). The
+       * CLI PRINTS these: an axiom that declined to run is inconclusive, and
+       * an inconclusive run must never look byte-identical to a clean one. */
+      declaredOnly: Degradation[];
       degradedRun: boolean;
       /** Exit-code gate over findings + config (blocking/advisory/off + maxFindings). */
       gate: GateResult;
@@ -394,6 +420,17 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewRunRes
   // analyzer input (1.9 direction/unassigned rules), so it must invalidate.
   // The TypeScript version is a toolchain input: an upgrade can change parse
   // output, so it must invalidate.
+  // Axiom 6 (1.13) reads the persisted structural seed — an analyzer input
+  // that lives OUTSIDE the change set (`_agentic-guardrails/` is excluded from
+  // it), so its content must be in that axiom's key or a re-inited corpus
+  // would serve stale conformance findings. "absent" is the honest sentinel:
+  // the no-corpus state is itself an input worth keying on. The bytes are
+  // read ONCE and handed to the analyzer through the context, so the hashed
+  // corpus and the analyzed corpus are the same buffer.
+  const corpusSeed = readStructuralSeedFile(root.value);
+  const seedHash = corpusSeed.ok
+    ? createHash("sha256").update(corpusSeed.bytes).digest("hex")
+    : "absent";
   const findingsKeyFor = (axiom: string): string | undefined => {
     if (cacheDisabled !== undefined) return undefined;
     return createHash("sha256")
@@ -405,6 +442,7 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewRunRes
           // cover them all — a changed .env must invalidate its entry. The
           // other axioms see only analyzable TS.
           axiom === "5" ? fileHashes : analyzableHashes,
+          axiom === "6" ? seedHash : null,
           [...graphKeys.values()].sort(),
           "uncommitted",
           config.boundaries ?? null,
@@ -439,6 +477,7 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewRunRes
     graphCache,
     changedFilesCache,
     signal: controller.signal,
+    corpusSeed,
   };
 
   // ---- Phase 1: deterministic tier (per-axiom isolation) ------------------
@@ -534,6 +573,12 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewRunRes
   const findings: Finding[] = [];
   const runDegraded: Degradation[] = [...discovery.degraded];
   const analyzerDegraded: [axiom: string, degradation: Degradation][] = [];
+  // The "absent until init" carve-out (1.8, generalized in 1.13): an analyzer
+  // DECLARES which of its degradations are exit-neutral. The pipeline never
+  // string-matches reasons — a forged or drifting message can no longer buy
+  // an exemption, and every real degradation (unreadable/invalid/empty inputs
+  // included) drives exit 2 exactly as before.
+  const declaredOnly: Degradation[] = [];
   for (const analyzer of analyzers) {
     const result = settled.get(analyzer.axiom);
     if (result === undefined) {
@@ -546,6 +591,7 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewRunRes
     }
     findings.push(...result.findings);
     for (const d of result.degraded) analyzerDegraded.push([analyzer.axiom, d]);
+    declaredOnly.push(...(result.declaredOnly ?? []));
   }
   // CROSS-ANALYZER dedupe only: two graph-consuming analyzers (1.10) declare
   // the SAME graph-build degradations — one event, one entry. A (reason,
@@ -592,7 +638,12 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewRunRes
   // ---- Phase 4: aggregation (FR-21 merge, then deterministic sort) --------
   const merged = mergeFindings(findings);
   merged.sort(byFileLineAxiom);
-  runDegraded.sort((a, b) => compare(a.subject, b.subject) || compare(a.reason, b.reason));
+  const bySubjectReason = (a: Degradation, b: Degradation): number =>
+    compare(a.subject, b.subject) || compare(a.reason, b.reason);
+  runDegraded.sort(bySubjectReason);
+  // Sorted like every sibling list: analyzer map insertion order must never
+  // reach the artifact's bytes.
+  declaredOnly.sort(bySubjectReason);
 
   // ---- Phase 5: composition -----------------------------------------------
   // Config-plane visibility: warnings (never degradations, never exit 2).
@@ -670,6 +721,9 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewRunRes
     axiomsOff,
     ...(ledger.hash === undefined ? {} : { ledgerHash: ledger.hash }),
     ...(corpus.hash === undefined ? {} : { corpusHash: corpus.hash }),
+    // The corpus axiom 6 actually judged against — reproducibility, and the
+    // explicit distinction from `corpusHash` (committed corpus-map.yaml).
+    ...(corpusSeed.ok ? { corpusSeedHash: seedHash } : {}),
     configHash: loaded.configHash,
     configPresent: loaded.configPresent,
     enforcement,
@@ -689,7 +743,7 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewRunRes
     changedFiles,
     deletedFiles,
     findings: merged,
-    degraded: [...sentinelDegraded, ...runDegraded],
+    degraded: [...sentinelDegraded, ...declaredOnly, ...runDegraded],
     manifest,
     gate,
   };
@@ -709,6 +763,7 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewRunRes
     artifact,
     artifactJson: `${JSON.stringify(artifact, null, 2)}\n`,
     runDegraded,
+    declaredOnly,
     degradedRun: runDegraded.length > 0,
     gate,
     configPresent: loaded.configPresent,

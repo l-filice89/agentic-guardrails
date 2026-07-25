@@ -10,6 +10,33 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Axiom #6 conformance analyzer (Story 1.13, `rulesetVersion: 6`, documented
+  in `docs/rules/axiom-6-conformance.md`): the fifth registered deterministic
+  analyzer and the first consumer of the Story-1.8 structural corpus seed.
+  Three prevalence-gated rules, all `severity: "warning"` —
+  `conformance/naming-convention`, `conformance/file-placement` and
+  `conformance/module-shape` — each judged against the nearest directory
+  scope that holds ≥ `MIN_SAMPLE` (10) classifiable corpus files with a ≥
+  `DOMINANCE` (0.8) majority; below either bar the analyzer says nothing, and
+  every message cites the measured counts and the scope. A file is judged on
+  naming/placement only where its path is NEW to the corpus (its presence
+  there means the decision pre-dates the diff), and module-shape ignores
+  import edges originating in the change set: a diff can never confirm the
+  convention it is judged by. An ABSENT seed is inconclusive — zero findings
+  plus one declared, exit-neutral degradation, now printed as a
+  `guardrails review: inconclusive: …` line; a present-but-corrupt seed is a
+  real degradation and exits 2 like any other lost coverage.
+- `AnalyzerResult.declaredOnly`: analyzers DECLARE which of their
+  degradations are exit-neutral instead of the pipeline string-matching
+  reasons. Sorted like every sibling list before it reaches the artifact.
+- `manifest.corpusSeedHash`: the structural corpus seed axiom-6 findings were
+  measured against, so they are reproducible from the manifest. Distinct from
+  `corpusHash` (the committed `corpus-map.yaml`). The seed is read once per
+  run and the same bytes feed the cache key and the analyzer.
+- `structuralSeedSchema` now enforces the producer's partial-result invariant
+  (`coverage < 1` requires a degraded entry) and rejects duplicate or
+  backslash entity paths.
+
 - Axiom #5 security analyzer (Story 1.12, `rulesetVersion: 5`, documented in
   `docs/rules/axiom-5-security.md`): the fourth registered deterministic
   analyzer — the one FR-32 names as gate-critical (every axiom defaults to
