@@ -4,6 +4,7 @@ type: 'feature'
 created: '2026-07-25'
 status: 'done'
 baseline_revision: e617868bb6f65565a4083c637f9b5552af9f9488
+final_revision: 0187a712d92e4eea76d81a5fecf58e0663373dce
 review_loop_iteration: 0
 followup_review_recommended: true # AUTO-FORCED: one HIGH inline finding (hoisted-declaration false positives in a blocking rule) + oversized acceptance
 context: []
