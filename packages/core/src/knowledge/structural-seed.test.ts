@@ -11,15 +11,16 @@ function buildResult(): ImportGraphBuildResult {
     { file: "src/a.ts", external: false },
   ];
   const edges = [
-    { from: "src/a.ts", to: "src/b.ts", dynamic: false, typeOnly: false, reExport: false },
-    { from: "src/b.ts", to: "zod", dynamic: false, typeOnly: false, reExport: false },
-    { from: "src/a.ts", to: "zod", dynamic: false, typeOnly: false, reExport: false },
+    { from: "src/a.ts", to: "src/b.ts", dynamic: false, typeOnly: false, reExport: false, line: 1 },
+    { from: "src/b.ts", to: "zod", dynamic: false, typeOnly: false, reExport: false, line: 2 },
+    { from: "src/a.ts", to: "zod", dynamic: false, typeOnly: false, reExport: false, line: 2 },
   ];
   return {
     data: new ImportGraph(nodes, edges),
     coverage: 0.5,
     attempted: 4,
     unresolved: 2,
+    unresolvedImports: [],
     degraded: [
       { reason: "z-later", subject: "src/z.ts" },
       { reason: "a-first", subject: "src/a.ts" },

@@ -52,7 +52,7 @@ development_status:
   1-6-config-plane: done
   1-7-pipeline-hardening-and-deterministic-cache: done
   1-8-init-and-the-structural-corpus-seed: done
-  1-9-axiom-1-structural-analyzer-full-rule-set: backlog
+  1-9-axiom-1-structural-analyzer-full-rule-set: done
   1-10-axiom-3-cleanliness-analyzer-ast-tier: backlog
   1-11-axiom-4-nfr-analyzer-structural-tier: backlog
   1-12-axiom-5-security-analyzer-regex-ast-tier: backlog

@@ -162,7 +162,10 @@ export function loadConfig(repoRoot: string): LoadConfigResult {
  * One line per value deviating from the EFFECTIVE defaults the gate applies
  * (enforcement "blocking", maxFindings 0 — for every axiom), restricted to
  * paths the user actually wrote. Restating an effective default (e.g. an
- * explicit `maxFindings: 0` on a blocking axiom) is not a deviation.
+ * explicit `maxFindings: 0` on a blocking axiom) is not a deviation. A
+ * declared `boundaries` key always deviates (the default is no declaration)
+ * — zero-silent-config: enabling two extra structural rules must be visible
+ * at run start.
  */
 function computeDeviations(raw: unknown, config: Config): string[] {
   const rawAxioms =
@@ -182,6 +185,10 @@ function computeDeviations(raw: unknown, config: Config): string[] {
         )})`,
       );
     }
+  }
+  if (config.boundaries !== undefined) {
+    const n = config.boundaries.layers.length;
+    lines.push(`boundaries: ${n} layer${n === 1 ? "" : "s"} declared (default: none)`);
   }
   return lines.sort(numericCompare);
 }

@@ -24,6 +24,7 @@ import type {
   ImportGraphEdge,
   ImportGraphNode,
   LanguageAdapter,
+  UnresolvedImport,
 } from "./language-adapter.js";
 
 interface EdgeFlags {
@@ -34,11 +35,37 @@ interface EdgeFlags {
 
 const STATIC: EdgeFlags = { dynamic: false, typeOnly: false, reExport: false };
 
+/** Test against the tsconfig `paths` patterns: an unresolved specifier
+ * matching one is a broken ALIAS (actionable finding material), not a bare
+ * external package. Prefix AND suffix around the `*` must match (with a
+ * length guard so overlapping pre/suf never match a short specifier). A bare
+ * `"*"` catch-all matches EVERY bare specifier and is therefore no alias
+ * signal at all — skipped, or every typo'd package would fire the
+ * unresolved-import rule. */
+function matchesPathsAlias(specifier: string, patterns: readonly string[]): boolean {
+  return patterns.some((pattern) => {
+    const star = pattern.indexOf("*");
+    if (star === -1) return specifier === pattern;
+    const pre = pattern.slice(0, star);
+    const suf = pattern.slice(star + 1);
+    if (pre === "" && suf === "") return false; // bare "*" catch-all
+    return (
+      specifier.length >= pre.length + suf.length &&
+      specifier.startsWith(pre) &&
+      specifier.endsWith(suf)
+    );
+  });
+}
+
 /** Node builtins never resolve to a source file — they are verified
  * externals, not unresolved imports (a `node:fs` import is not coverage loss). */
 const NODE_BUILTINS = new Set(builtinModules);
 function isNodeBuiltin(specifier: string): boolean {
   return specifier.startsWith("node:") || NODE_BUILTINS.has(specifier);
+}
+
+function compareStrings(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0; // code-point order, locale-independent
 }
 
 export class TypeScriptAdapter implements LanguageAdapter {
@@ -74,6 +101,7 @@ export class TypeScriptAdapter implements LanguageAdapter {
         coverage: 0,
         attempted: 0,
         unresolved: 0,
+        unresolvedImports: [],
         degraded: [
           {
             reason: `tsconfig load failed: ${message}`,
@@ -91,6 +119,7 @@ export class TypeScriptAdapter implements LanguageAdapter {
         coverage: 0,
         attempted: 0,
         unresolved: 0,
+        unresolvedImports: [],
         degraded: [
           {
             reason: "no project source files under rootDir",
@@ -111,6 +140,10 @@ export class TypeScriptAdapter implements LanguageAdapter {
     const degradedByKey = new Map<string, Degradation>();
     const attempts = new Set<string>();
     const unresolved = new Set<string>();
+    // (from, specifier) → smallest failing import line, for the
+    // structural/unresolved-import finding surface.
+    const unresolvedByKey = new Map<string, UnresolvedImport>();
+    const pathsPatterns = Object.keys(project.getCompilerOptions().paths ?? {});
 
     const degrade = (reason: string, subject: string): void => {
       degradedByKey.set(JSON.stringify([reason, subject]), { reason, subject });
@@ -120,17 +153,30 @@ export class TypeScriptAdapter implements LanguageAdapter {
       attempts.add(key);
       if (!resolved) unresolved.add(key);
     };
+    const recordUnresolvedImport = (
+      from: string,
+      specifier: string,
+      line: number,
+      typeOnly: boolean,
+    ): void => {
+      const key = JSON.stringify([from, specifier]);
+      const existing = unresolvedByKey.get(key);
+      if (existing === undefined || line < existing.line) {
+        unresolvedByKey.set(key, { from, specifier, line, typeOnly });
+      }
+    };
 
     const record = (
       from: string,
       specifier: string,
       resolvedAbsolutePath: string | undefined,
       flags: EdgeFlags,
+      line: number,
     ): void => {
       if (resolvedAbsolutePath === undefined && isNodeBuiltin(specifier)) {
         attempt(from, specifier, true);
         nodes.push({ file: specifier, external: true });
-        edges.push({ from, to: specifier, ...flags });
+        edges.push({ from, to: specifier, ...flags, line });
         return;
       }
       if (resolvedAbsolutePath !== undefined) {
@@ -139,7 +185,7 @@ export class TypeScriptAdapter implements LanguageAdapter {
           // Resolved into node_modules: a verified external package.
           attempt(from, specifier, true);
           nodes.push({ file: specifier, external: true });
-          edges.push({ from, to: specifier, ...flags });
+          edges.push({ from, to: specifier, ...flags, line });
           return;
         }
         if (path.isAbsolute(rel) || rel.startsWith("..")) {
@@ -147,26 +193,32 @@ export class TypeScriptAdapter implements LanguageAdapter {
           // the project root: external with the raw specifier + degraded.
           attempt(from, specifier, true);
           nodes.push({ file: specifier, external: true });
-          edges.push({ from, to: specifier, ...flags });
+          edges.push({ from, to: specifier, ...flags, line });
           degrade("resolved outside project root", `${from} -> ${specifier}`);
           return;
         }
         attempt(from, specifier, true);
-        edges.push({ from, to: rel, ...flags });
+        edges.push({ from, to: rel, ...flags, line });
         return;
       }
       attempt(from, specifier, false);
       if (specifier.startsWith(".") || specifier.startsWith("/")) {
         // A relative path the compiler could not resolve: typed degradation,
-        // no edge, no throw.
+        // no edge, no throw — plus the actionable unresolved-import record.
         degrade("unresolvable import specifier", `${from} -> ${specifier}`);
+        recordUnresolvedImport(from, specifier, line, flags.typeOnly);
         return;
       }
       // Bare specifier with no resolution (typo/uninstalled): still recorded
-      // as an external node/edge, but flagged degraded and unresolved.
+      // as an external node/edge, but flagged degraded and unresolved. A
+      // specifier matching a tsconfig `paths` pattern is a broken ALIAS —
+      // that one also gets the unresolved-import record.
       nodes.push({ file: specifier, external: true });
-      edges.push({ from, to: specifier, ...flags });
+      edges.push({ from, to: specifier, ...flags, line });
       degrade("unresolved bare specifier", `${from} -> ${specifier}`);
+      if (matchesPathsAlias(specifier, pathsPatterns)) {
+        recordUnresolvedImport(from, specifier, line, flags.typeOnly);
+      }
     };
 
     for (const sf of ownFiles) {
@@ -178,6 +230,7 @@ export class TypeScriptAdapter implements LanguageAdapter {
           decl.getModuleSpecifierValue(),
           decl.getModuleSpecifierSourceFile()?.getFilePath(),
           { dynamic: false, typeOnly: isTypeOnlyImport(decl), reExport: false },
+          decl.getStartLineNumber(),
         );
       }
 
@@ -189,6 +242,7 @@ export class TypeScriptAdapter implements LanguageAdapter {
           specifier,
           decl.getModuleSpecifierSourceFile()?.getFilePath(),
           { dynamic: false, typeOnly: isTypeOnlyExport(decl), reExport: true },
+          decl.getStartLineNumber(),
         );
       }
 
@@ -199,7 +253,13 @@ export class TypeScriptAdapter implements LanguageAdapter {
         const expr = ref.getExpression();
         if (expr === undefined || !expr.isKind(SyntaxKind.StringLiteral)) continue;
         const specifier = expr.getLiteralValue();
-        record(from, specifier, resolveWithCompiler(project, sf, specifier), STATIC);
+        record(
+          from,
+          specifier,
+          resolveWithCompiler(project, sf, specifier),
+          STATIC,
+          decl.getStartLineNumber(),
+        );
       }
 
       // `import(...)` and `require(...)` call expressions: literal argument
@@ -213,11 +273,13 @@ export class TypeScriptAdapter implements LanguageAdapter {
         const arg = call.getArguments()[0];
         if (arg !== undefined && arg.isKind(SyntaxKind.StringLiteral)) {
           const specifier = arg.getLiteralValue();
-          record(from, specifier, resolveWithCompiler(project, sf, specifier), {
-            dynamic: isDynamicImport,
-            typeOnly: false,
-            reExport: false,
-          });
+          record(
+            from,
+            specifier,
+            resolveWithCompiler(project, sf, specifier),
+            { dynamic: isDynamicImport, typeOnly: false, reExport: false },
+            call.getStartLineNumber(),
+          );
           continue;
         }
         // Non-literal specifier (variable/template/conditional): the target
@@ -238,6 +300,9 @@ export class TypeScriptAdapter implements LanguageAdapter {
       coverage,
       attempted: attempts.size,
       unresolved: unresolved.size,
+      unresolvedImports: [...unresolvedByKey.values()].sort(
+        (a, b) => compareStrings(a.from, b.from) || compareStrings(a.specifier, b.specifier),
+      ),
       degraded: [...degradedByKey.values()],
     };
   }

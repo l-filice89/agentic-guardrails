@@ -2,12 +2,17 @@ import { describe, expect, it } from "vitest";
 
 import { ImportGraph, normalizePath } from "./import-graph.js";
 
-const edge = (from: string, to: string, flags?: Partial<{ dynamic: boolean; typeOnly: boolean; reExport: boolean }>) => ({
+const edge = (
+  from: string,
+  to: string,
+  flags?: Partial<{ dynamic: boolean; typeOnly: boolean; reExport: boolean; line: number }>,
+) => ({
   from,
   to,
   dynamic: false,
   typeOnly: false,
   reExport: false,
+  line: 1,
   ...flags,
 });
 
@@ -57,6 +62,26 @@ describe("ImportGraph determinism", () => {
       [edge("a.ts", "b.ts"), edge("a.ts", "b.ts"), edge("a.ts", "b.ts", { typeOnly: true })],
     );
     expect(g.edges).toHaveLength(2);
+  });
+
+  it("dedupes duplicate imports of the same target to ONE edge carrying the SMALLEST line", () => {
+    // Edge identity is (from, to, flags) WITHOUT line: duplicate imports are
+    // one dependency (fanIn/fanOut and the structural seed count distinct
+    // edges); the kept line is the smallest observed — deterministic in any
+    // insertion order.
+    const g = new ImportGraph(
+      [{ file: "a.ts", external: false }, { file: "b.ts", external: false }],
+      [edge("a.ts", "b.ts", { line: 5 }), edge("a.ts", "b.ts", { line: 1 })],
+    );
+    expect(g.edges).toHaveLength(1);
+    expect(g.edges[0]!.line).toBe(1);
+    expect(g.fanIn("b.ts").data.count).toBe(1);
+    // Differently-flagged edges keep their own identity (and line).
+    const h = new ImportGraph(
+      [{ file: "a.ts", external: false }, { file: "b.ts", external: false }],
+      [edge("a.ts", "b.ts", { line: 5 }), edge("a.ts", "b.ts", { typeOnly: true, line: 3 })],
+    );
+    expect(h.edges).toHaveLength(2);
   });
 
   it("dedupes nodes after separator normalization", () => {

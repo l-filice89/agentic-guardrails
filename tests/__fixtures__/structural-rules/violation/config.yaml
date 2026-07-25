@@ -1,0 +1,9 @@
+axioms: {}
+boundaries:
+  layers:
+    - name: app
+      paths: [src/app]
+    - name: lib
+      paths: [src/lib]
+  allowed:
+    app: [lib]

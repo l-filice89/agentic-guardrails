@@ -15,10 +15,15 @@ import type { Degradation, RunManifest } from "@agentic-guardrails/contracts";
 // this constant); switch to `import pkg from "../../package.json" with
 // { type: "json" }` when releases start bumping versions and drift becomes
 // possible.
-export const ENGINE_VERSION = "0.0.1";
+// 0.0.2: the cached-graph payload schema changed in 1.9 (edge `line`,
+// `unresolvedImports`) — the bump gives pre-upgrade cache entries new keys,
+// so a warm repo takes the clean-miss path instead of strict-revalidation
+// failure (which would read as corruption and degrade the run).
+export const ENGINE_VERSION = "0.0.2";
 
-/** Version of the deterministic ruleset (one rule so far: 1.4 skeleton). */
-export const RULESET_VERSION = "1";
+/** Version of the deterministic ruleset ("2": the Story 1.9 four-rule
+ * axiom-1 set with real import-line anchors). */
+export const RULESET_VERSION = "2";
 
 /** sha256 of the empty string — the sentinel for "this input does not exist yet". */
 export const ABSENT_SHA256 = createHash("sha256").update("").digest("hex");

@@ -379,6 +379,99 @@ describe("configSchema", () => {
     expect(result.success).toBe(false);
     expect(JSON.stringify(result.error?.issues)).toContain("axiom");
   });
+
+  it("accepts an optional boundaries declaration; configs without it keep parsing", () => {
+    expect(configSchema.safeParse({}).data?.boundaries).toBeUndefined();
+    const parsed = configSchema.safeParse({
+      boundaries: {
+        layers: [
+          { name: "app", paths: ["src/app"] },
+          { name: "lib", paths: ["src/lib"] },
+        ],
+        allowed: { app: ["lib"] },
+      },
+    });
+    expect(parsed.success).toBe(true);
+    expect(parsed.data?.boundaries?.layers).toHaveLength(2);
+    // `allowed` defaults to {} — layers-only declarations are fail-closed.
+    expect(
+      configSchema.safeParse({ boundaries: { layers: [{ name: "app", paths: ["src"] }] } }).data
+        ?.boundaries?.allowed,
+    ).toEqual({});
+  });
+
+  it("rejects boundaries.allowed keys/values referencing undeclared layers, naming the path", () => {
+    const badKey = configSchema.safeParse({
+      boundaries: { layers: [{ name: "app", paths: ["src/app"] }], allowed: { ghost: [] } },
+    });
+    expect(badKey.success).toBe(false);
+    expect(badKey.error?.issues.some((i) => i.path.join(".") === "boundaries.allowed.ghost")).toBe(
+      true,
+    );
+    const badValue = configSchema.safeParse({
+      boundaries: { layers: [{ name: "app", paths: ["src/app"] }], allowed: { app: ["ghost"] } },
+    });
+    expect(badValue.success).toBe(false);
+    expect(
+      badValue.error?.issues.some((i) => i.path.join(".") === "boundaries.allowed.app.0"),
+    ).toBe(true);
+  });
+
+  it("rejects duplicate layer names, empty layers, and empty paths", () => {
+    expect(
+      configSchema.safeParse({
+        boundaries: {
+          layers: [
+            { name: "app", paths: ["src/app"] },
+            { name: "app", paths: ["src/other"] },
+          ],
+          allowed: {},
+        },
+      }).success,
+    ).toBe(false);
+    expect(configSchema.safeParse({ boundaries: { layers: [], allowed: {} } }).success).toBe(false);
+    expect(
+      configSchema.safeParse({ boundaries: { layers: [{ name: "app", paths: [] }], allowed: {} } })
+        .success,
+    ).toBe(false);
+  });
+
+  it("rejects malformed layer path prefixes, naming each exact path", () => {
+    const bad = (p: string) =>
+      configSchema.safeParse({
+        boundaries: { layers: [{ name: "app", paths: [p] }], allowed: {} },
+      });
+    for (const p of ["src/*", "src?", "src[ab]", "src\\app", "./src/app", "/src/app", "src/app/", "  "]) {
+      const result = bad(p);
+      expect(result.success, `path ${JSON.stringify(p)} must be rejected`).toBe(false);
+      expect(
+        result.error?.issues.some((i) => i.path.join(".") === "boundaries.layers.0.paths.0"),
+        `issue for ${JSON.stringify(p)} must name boundaries.layers.0.paths.0`,
+      ).toBe(true);
+    }
+    // A plain repo-relative prefix stays valid.
+    expect(bad("src/app").success).toBe(true);
+  });
+
+  it("rejects the SAME path declared in two different layers, naming the duplicate", () => {
+    const result = configSchema.safeParse({
+      boundaries: {
+        layers: [
+          { name: "app", paths: ["src/shared"] },
+          { name: "lib", paths: ["src/shared"] },
+        ],
+        allowed: {},
+      },
+    });
+    expect(result.success).toBe(false);
+    expect(
+      result.error?.issues.some(
+        (i) =>
+          i.path.join(".") === "boundaries.layers.1.paths.0" &&
+          i.message.includes('already declared by layer "app"'),
+      ),
+    ).toBe(true);
+  });
 });
 
 describe("trend and disposition records", () => {

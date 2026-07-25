@@ -10,6 +10,11 @@ export interface FindingIdInput {
    * The line-drift-stable anchor: the enclosing symbol name from the AST, or
    * a normalized context string when no symbol exists. Deliberately NOT a
    * line/column number, so ids survive unrelated lines being added above.
+   *
+   * CONVENTION: a Finding with NO `enclosingSymbol` (file-level identity,
+   * e.g. `structural/unassigned-file`) hashes the EMPTY STRING here — pass
+   * `""`. Recomputing an id from a persisted Finding therefore maps an
+   * absent `enclosingSymbol` field to `""`.
    */
   enclosingSymbol: string;
 }

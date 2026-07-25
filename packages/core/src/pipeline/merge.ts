@@ -2,8 +2,11 @@
  * FR-21 reduce/merge (story 1.7). Pure and deterministic — same input,
  * same output, no I/O. The rules, stated ONCE, here:
  *
- * - Findings merge only within the same (file, axiom, tier). Different
- *   axioms — or files, or tiers — NEVER merge.
+ * - Findings merge only within the same (file, axiom, tier, ruleId).
+ *   Different axioms — or files, tiers, or rules — NEVER merge: two DIFFERENT
+ *   rules colliding at one line are two distinct issues (each keeps its own
+ *   ruleId, message, and disposition); FR-21's target is the SAME rule
+ *   firing across sources/ranges.
  * - Overlap rule: two ranges merge when the overlapping line count is
  *   STRICTLY greater than 50% of the SMALLER range's line count. A
  *   contained range therefore always merges (overlap = 100% of itself);
@@ -33,7 +36,7 @@ export const MERGED_MESSAGE_SEPARATOR = " | ";
 export function mergeFindings(findings: readonly Finding[]): Finding[] {
   const groups = new Map<string, Finding[]>();
   for (const finding of findings) {
-    const key = JSON.stringify([finding.location.file, finding.axiom, finding.tier]);
+    const key = JSON.stringify([finding.location.file, finding.axiom, finding.tier, finding.ruleId]);
     const group = groups.get(key);
     if (group) group.push(finding);
     else groups.set(key, [finding]);
@@ -48,10 +51,10 @@ export function mergeFindings(findings: readonly Finding[]): Finding[] {
         a.location.endLine - b.location.endLine ||
         compare(a.findingId, b.findingId) ||
         // Full tie-break: two distinct findings can share range AND id (e.g.
-        // the same rule firing twice on one symbol) — message/ruleId keep
-        // the merged-message order, and thus the artifact bytes, stable.
-        compare(a.message, b.message) ||
-        compare(a.ruleId, b.ruleId),
+        // the same rule firing twice on one symbol) — the message keeps the
+        // merged-message order, and thus the artifact bytes, stable (ruleId
+        // is constant within a group — it is part of the group key).
+        compare(a.message, b.message),
     );
     let cluster: Finding[] = [group[0]!];
     let start = group[0]!.location.startLine;

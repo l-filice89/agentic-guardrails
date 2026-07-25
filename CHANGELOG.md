@@ -10,6 +10,39 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Axiom #1 full structural rule set (Story 1.9, `rulesetVersion: 2`,
+  documented in `docs/rules/axiom-1-structural.md`): import-graph edges now
+  carry the 1-based import-statement `line` (dynamic imports: the call
+  site), so every axiom-1 finding anchors at the real import line instead
+  of line 1. New rules alongside the absorbed `structural/circular-import`:
+  `structural/unresolved-import` (error — a changed file's relative/alias
+  specifier that fails resolution, specifier in the message; bare externals
+  and node builtins stay verified externals, the paired graph degradation
+  remains the coverage truth), and — with the new optional `boundaries`
+  config key (path-prefix `layers` + fail-closed `allowed` dependency map,
+  cross-references schema-refined, longest-prefix layer assignment,
+  same-layer imports always allowed) — `structural/dependency-direction`
+  (error — from→to layer pair not in the allowed map; type-only edges
+  exempt, dynamic imports and re-exports checked) and
+  `structural/unassigned-file` (warning — changed file matching no declared
+  layer prefix). Absent `boundaries` → those two rules emit nothing (not a
+  degradation) and existing configs/artifacts are unchanged. An internal
+  import target assigned to NO declared layer also fires the direction rule
+  (the `(unassigned)` pseudo-layer — no evasion by routing through an
+  unassigned file), and layer path prefixes are schema-validated (no globs/
+  backslashes/`./`/absolute/trailing-`/`; a path belongs to one layer). The
+  `boundaries` declaration participates in the findings cache key, and
+  `ENGINE_VERSION` is bumped to `0.0.2` because the cached-graph payload
+  shape changed (edge `line`, `unresolvedImports`) — pre-upgrade cache
+  entries live under old keys and become clean misses (a designed miss,
+  never a revalidation failure masquerading as corruption). FR-21 merge
+  granularity now includes `ruleId`: different rules colliding at one line
+  stay distinct findings. Import-graph edge identity stays line-free
+  (duplicate imports of one target are one edge carrying the smallest
+  observed line), keeping fanIn/fanOut and the 1.8 structural seed stable.
+  Machine oracle fixtures under `tests/__fixtures__/structural-rules/`
+  (violation findings byte-compared twice + clean fixture asserting zero
+  findings) via `tests/integration/structural-rules.e2e.test.ts`.
 - `guardrails init` + structural corpus seed (Story 1.8): bootstraps
   `_agentic-guardrails/` — `config.yaml` from the 1.6 default constants or a
   per-axiom TTY questionnaire (option values sourced from the contracts

@@ -10,7 +10,7 @@ import {
 import os from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
 import {
@@ -18,6 +18,10 @@ import {
   DeterministicCache,
   loadCacheSecret,
 } from "./deterministic-cache.js";
+
+// Heavy filesystem churn (100+ entry prune) can exceed the 5s default
+// under full-suite parallel load.
+vi.setConfig({ testTimeout: 30_000 });
 
 const schema = z.strictObject({ value: z.number() });
 const KEY = "a".repeat(64);

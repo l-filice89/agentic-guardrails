@@ -13,8 +13,9 @@ import os from "node:os";
 import path from "node:path";
 
 import { computeFindingId, type Finding } from "@agentic-guardrails/contracts";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { ENGINE_VERSION } from "./manifest.js";
 import { normalizeCacheTruth } from "./normalize-cache-truth.js";
 import {
   computeGraphKey,
@@ -22,6 +23,10 @@ import {
   runReview,
   type Analyzer,
 } from "./pipeline.js";
+
+// git spawns + real graph builds legitimately exceed the 5s default under
+// full-suite parallel load.
+vi.setConfig({ testTimeout: 60_000 });
 
 const tempDirs: string[] = [];
 
@@ -634,6 +639,33 @@ describe("computeGraphKey toolchain invalidation (P5)", () => {
     expect(upgraded).not.toBe(current);
     // Same version → same key (the key stays content-addressed).
     expect(computeGraphKey(cwd, tsconfigPath)).toBe(current);
+  });
+});
+
+describe("engine-version upgrade path (1.9)", () => {
+  it("pre-upgrade cache entries become clean key MISSES — never read, never invalid, no degradation", async () => {
+    const cwd = tempRepoWithChange();
+    const tsconfigPath = path.join(cwd, "tsconfig.json");
+    // The 1.9 payload-schema change (edge `line`, `unresolvedImports`) was
+    // paired with an ENGINE_VERSION bump: old entries live under old keys.
+    expect(ENGINE_VERSION).not.toBe("0.0.1");
+    const oldKey = computeGraphKey(cwd, tsconfigPath, undefined, "0.0.1");
+    const newKey = computeGraphKey(cwd, tsconfigPath);
+    expect(oldKey).toBeDefined();
+    expect(newKey).toBeDefined();
+    expect(newKey).not.toBe(oldKey);
+    // Plant a stale pre-upgrade entry under the OLD key: the post-upgrade
+    // run must never read it — a clean miss, not an "invalid entry"
+    // degradation implying corruption.
+    const graphDir = path.join(cwd, "_agentic-guardrails", ".cache", "graph");
+    mkdirSync(graphDir, { recursive: true });
+    writeFileSync(path.join(graphDir, `${oldKey}.json`), "{ stale pre-upgrade shape");
+    const result = await runReview({ cwd }); // default analyzers — real graph build
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.artifact.manifest.cache).toMatchObject({ hits: 0, invalid: 0 });
+    expect(result.artifact.manifest.cache!.misses).toBeGreaterThan(0);
+    expect(result.degradedRun).toBe(false);
   });
 });
 

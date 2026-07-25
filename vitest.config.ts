@@ -31,6 +31,9 @@ export default defineConfig({
           name: "integration",
           include: ["tests/integration/**/*.test.ts"],
           passWithNoTests: true,
+          // No project-wide timeout override: the spawn-heavy e2e suites set
+          // their own per-file budgets via `vi.setConfig({ testTimeout })`,
+          // so a hung non-spawning test still fails at the 5s default.
         },
       },
     ],

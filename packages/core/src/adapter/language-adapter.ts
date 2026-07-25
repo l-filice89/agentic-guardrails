@@ -18,15 +18,32 @@ export const importGraphNodeSchema = z.strictObject({
 });
 export type ImportGraphNode = z.infer<typeof importGraphNodeSchema>;
 
-/** One resolved import/re-export relationship between two nodes. */
+/** One resolved import/re-export relationship between two nodes. `line` is
+ * the 1-based start line of the import/export declaration (dynamic imports:
+ * the call site) — the anchor every axiom-1 rule reports at. */
 export const importGraphEdgeSchema = z.strictObject({
   from: z.string().min(1),
   to: z.string().min(1),
   dynamic: z.boolean(),
   typeOnly: z.boolean(),
   reExport: z.boolean(),
+  line: z.int().positive(),
 });
 export type ImportGraphEdge = z.infer<typeof importGraphEdgeSchema>;
+
+/** One import specifier that failed resolution (relative or `paths`-alias —
+ * bare external specifiers are verified externals, never unresolved). Feeds
+ * the `structural/unresolved-import` rule; the paired graph-build
+ * degradation stays as the coverage truth. */
+export const unresolvedImportSchema = z.strictObject({
+  from: z.string().min(1),
+  specifier: z.string().min(1),
+  line: z.int().positive(),
+  /** true → the failing declaration is type-only (erased at runtime) — the
+   * finding message must not imply runtime breakage. */
+  typeOnly: z.boolean(),
+});
+export type UnresolvedImport = z.infer<typeof unresolvedImportSchema>;
 
 /** The serialized graph shape — exactly what `ImportGraph.serialize()`
  * emits (modulo JSON formatting). */
@@ -62,6 +79,9 @@ export interface ImportGraphBuildResult extends PartialResultOf<ImportGraph> {
   attempted: number;
   /** How many of those attempts failed to resolve. */
   unresolved: number;
+  /** Relative/alias specifiers that failed resolution, with their import
+   * lines — deduped by (from, specifier) keeping the smallest line, sorted. */
+  unresolvedImports: UnresolvedImport[];
 }
 
 export interface BuildImportGraphOptions {

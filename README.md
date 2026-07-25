@@ -164,7 +164,9 @@ The v2 runtime lives in a pnpm-workspaces monorepo under `packages/`:
 - `packages/cli` (`@agentic-guardrails/cli`) — the `guardrails` command.
   `guardrails review` reviews all uncommitted changes (staged, unstaged,
   untracked) through the real pipeline: preflight → deterministic analyzers
-  (first rule: `structural/circular-import`, Axiom #1) → aggregation
+  (the Axiom #1 structural rule set — circular imports, unresolved imports,
+  dependency direction, unassigned files; see
+  `docs/rules/axiom-1-structural.md` for the full rule table) → aggregation
   (overlapping same-file/same-axiom findings merged per FR-21: >50%-of-the-
   smaller-range overlap, strongest severity, source union, both messages
   preserved) → composition. Unchanged inputs are served from a
@@ -223,6 +225,14 @@ axioms:
   "5":
     enforcement: blocking
     maxFindings: 2          # tolerate up to N error findings before exit 1 (default 0)
+boundaries:                 # optional: powers the axiom-1 direction/unassigned rules
+  layers:
+    - name: app
+      paths: [src/app]      # repo-relative path prefixes (longest match wins)
+    - name: lib
+      paths: [src/lib]
+  allowed:
+    app: [lib]              # app may import lib; undeclared pairs are violations
 ```
 
 Enforcement semantics: `blocking` error findings above `maxFindings` exit 1;

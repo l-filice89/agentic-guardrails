@@ -30,6 +30,10 @@ function nodeKey(n: ImportGraphNode): string {
   return JSON.stringify([n.file]);
 }
 
+// Edge identity is (from, to, flags) — deliberately WITHOUT `line`: duplicate
+// imports of the same target are ONE dependency (fanIn/fanOut count distinct
+// edges, and the 1.8 structural seed depends on that). The kept edge carries
+// the SMALLEST observed line for the identity (deterministic anchor).
 function edgeKey(e: ImportGraphEdge): string {
   return JSON.stringify([e.from, e.to, e.dynamic, e.typeOnly, e.reExport]);
 }
@@ -65,8 +69,11 @@ export class ImportGraph {
         dynamic: e.dynamic,
         typeOnly: e.typeOnly,
         reExport: e.reExport,
+        line: e.line,
       };
-      edgeByKey.set(edgeKey(edge), edge);
+      const key = edgeKey(edge);
+      const known = edgeByKey.get(key);
+      if (known === undefined || edge.line < known.line) edgeByKey.set(key, edge);
     }
     // Endpoint-closure invariant: every edge endpoint is a node. Synthesize
     // missing ones — bare (separator-free) endpoints are external packages,
@@ -119,6 +126,7 @@ export class ImportGraph {
         dynamic: e.dynamic,
         typeOnly: e.typeOnly,
         reExport: e.reExport,
+        line: e.line,
       })),
     };
   }

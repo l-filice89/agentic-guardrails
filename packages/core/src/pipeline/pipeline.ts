@@ -37,6 +37,7 @@ import {
   degradationSchema,
   findingSchema,
   reviewArtifactSchema,
+  type Boundaries,
   type Degradation,
   type Finding,
   type ReviewArtifact,
@@ -47,7 +48,11 @@ import { ts } from "ts-morph";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 
-import { importGraphDataSchema, type ImportGraphBuildResult } from "../adapter/language-adapter.js";
+import {
+  importGraphDataSchema,
+  unresolvedImportSchema,
+  type ImportGraphBuildResult,
+} from "../adapter/language-adapter.js";
 import { axiom1Structural } from "../analyzers/axiom1-structural.js";
 import { DeterministicCache, loadCacheSecret } from "../cache/deterministic-cache.js";
 import { evaluateGate, loadConfig, type GateResult } from "../config/config-loader.js";
@@ -89,6 +94,7 @@ const cachedGraphSchema = z.strictObject({
   coverage: z.number().min(0).max(1),
   attempted: z.int().min(0),
   unresolved: z.int().min(0),
+  unresolvedImports: z.array(unresolvedImportSchema),
   degraded: z.array(degradationSchema),
 });
 
@@ -109,6 +115,10 @@ export interface AnalyzerContext {
   /** Leaf tsconfigs to analyze: the root tsconfig itself, or — for a
    * solution-style root — each referenced project's tsconfig. */
   tsconfigPaths: readonly string[];
+  /** The loaded `boundaries` declaration (config plane, 1.9) — absent when
+   * the config declares none; the declaration-dependent structural rules
+   * then emit nothing. Analyzers never read config files themselves. */
+  boundaries?: Boundaries;
   /** Optional (absent in bare unit-test contexts): the content-addressed
    * graph cache the pipeline wires in. */
   graphCache?: GraphCache;
@@ -302,6 +312,7 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewRunRes
           coverage: read.value.coverage,
           attempted: read.value.attempted,
           unresolved: read.value.unresolved,
+          unresolvedImports: read.value.unresolvedImports,
           degraded: read.value.degraded,
         };
       }
@@ -327,16 +338,19 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewRunRes
         coverage: result.coverage,
         attempted: result.attempted,
         unresolved: result.unresolved,
+        unresolvedImports: result.unresolvedImports,
         degraded: result.degraded,
       });
     },
   };
   // Findings key (per axiom): graph keys + analyzable change hashes + scope
-  // + ruleset/engine/TypeScript versions + tier enablement. Config
-  // enforcement is NOT in the key on purpose — it never changes what an
-  // analyzer computes (off-axioms are excluded at membership level, gating
-  // happens later). The TypeScript version is a toolchain input: an upgrade
-  // can change parse output, so it must invalidate.
+  // + boundaries declaration + ruleset/engine/TypeScript versions + tier
+  // enablement. Config ENFORCEMENT is NOT in the key on purpose — it never
+  // changes what an analyzer computes (off-axioms are excluded at membership
+  // level, gating happens later) — but the `boundaries` declaration IS an
+  // analyzer input (1.9 direction/unassigned rules), so it must invalidate.
+  // The TypeScript version is a toolchain input: an upgrade can change parse
+  // output, so it must invalidate.
   const findingsKeyFor = (axiom: string): string | undefined => {
     if (cacheDisabled !== undefined) return undefined;
     return createHash("sha256")
@@ -347,6 +361,7 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewRunRes
           analyzableHashes,
           [...graphKeys.values()].sort(),
           "uncommitted",
+          config.boundaries ?? null,
           RULESET_VERSION,
           ENGINE_VERSION,
           ts.version,
@@ -360,6 +375,7 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewRunRes
     repoRoot: root.value,
     changedFiles: analyzableFiles,
     tsconfigPaths: discovery.tsconfigPaths,
+    ...(config.boundaries === undefined ? {} : { boundaries: config.boundaries }),
     graphCache,
     signal: controller.signal,
   };
@@ -799,12 +815,15 @@ function computeRunId(
  * participant is unreadable — a wrong or fake key would serve stale graphs,
  * no key just costs a recompute.
  *
- * Exported for the key-invalidation tests; `tsVersion` is their seam.
+ * Exported for the key-invalidation tests; `tsVersion` and `engineVersion`
+ * are their seams (an engine upgrade that changes the cached payload shape
+ * must land as a clean key miss, never a revalidation failure).
  */
 export function computeGraphKey(
   root: string,
   tsconfigPath: string,
   tsVersion: string = ts.version,
+  engineVersion: string = ENGINE_VERSION,
 ): string | undefined {
   try {
     const parsed = ts.getParsedCommandLineOfConfigFile(
@@ -821,7 +840,7 @@ export function computeGraphKey(
       return [path.relative(root, file).replaceAll("\\", "/"), hash];
     });
     return createHash("sha256")
-      .update(JSON.stringify(["graph", tsconfigHash, files, ENGINE_VERSION, tsVersion]))
+      .update(JSON.stringify(["graph", tsconfigHash, files, engineVersion, tsVersion]))
       .digest("hex");
   } catch {
     return undefined;

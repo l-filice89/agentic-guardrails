@@ -20,7 +20,12 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+
+// Spawn-heavy e2e: each test spawns the built CLI (git init + ts-morph
+// parses, often several times); under full-suite parallel load a single
+// test legitimately exceeds the 5s default.
+vi.setConfig({ testTimeout: 120_000 });
 
 import {
   findingSchema,

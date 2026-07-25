@@ -55,6 +55,28 @@ describe("mergeFindings (FR-21)", () => {
     expect(mergeFindings([at("a", 10, 19), at("b", 15, 30)])).toHaveLength(2);
   });
 
+  it("never merges DIFFERENT rules colliding at one line — distinct issues stay distinct", () => {
+    // FR-21 merges the SAME rule across sources/ranges; a circular-import
+    // and a dependency-direction finding at the same import line are two
+    // separate issues with separate ruleIds and dispositions.
+    const out = mergeFindings([
+      at("a", 2, 2, { ruleId: "structural/circular-import" }),
+      at("b", 2, 2, { ruleId: "structural/dependency-direction" }),
+    ]);
+    expect(out).toHaveLength(2);
+    expect(out.map((f) => f.ruleId).sort()).toEqual([
+      "structural/circular-import",
+      "structural/dependency-direction",
+    ]);
+    // Same rule at the same line still merges (the FR-21 use case).
+    expect(
+      mergeFindings([
+        at("a", 2, 2, { ruleId: "structural/circular-import", source: "ast" }),
+        at("b", 2, 2, { ruleId: "structural/circular-import", source: "regex" }),
+      ]),
+    ).toHaveLength(1);
+  });
+
   it("never merges across axioms, files, or tiers", () => {
     expect(mergeFindings([at("a", 10, 20), at("b", 10, 20, { axiom: "5" })])).toHaveLength(2);
     expect(

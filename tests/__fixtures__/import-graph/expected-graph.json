@@ -43,56 +43,64 @@
       "to": "src/impl.ts",
       "dynamic": false,
       "typeOnly": false,
-      "reExport": true
+      "reExport": true,
+      "line": 2
     },
     {
       "from": "src/main.ts",
       "to": "src/aliased/target.ts",
       "dynamic": false,
       "typeOnly": false,
-      "reExport": false
+      "reExport": false,
+      "line": 3
     },
     {
       "from": "src/main.ts",
       "to": "src/barrel.ts",
       "dynamic": false,
       "typeOnly": false,
-      "reExport": false
+      "reExport": false,
+      "line": 4
     },
     {
       "from": "src/main.ts",
       "to": "src/lazy.ts",
       "dynamic": true,
       "typeOnly": false,
-      "reExport": false
+      "reExport": false,
+      "line": 11
     },
     {
       "from": "src/main.ts",
       "to": "src/types.ts",
       "dynamic": false,
       "typeOnly": true,
-      "reExport": false
+      "reExport": false,
+      "line": 7
     },
     {
       "from": "src/main.ts",
       "to": "src/types2.ts",
       "dynamic": false,
       "typeOnly": true,
-      "reExport": false
+      "reExport": false,
+      "line": 8
     },
     {
       "from": "src/main.ts",
       "to": "typescript",
       "dynamic": false,
       "typeOnly": false,
-      "reExport": false
+      "reExport": false,
+      "line": 2
     },
     {
       "from": "src/main.ts",
       "to": "unresolvable-pkg-xyz",
       "dynamic": false,
       "typeOnly": false,
-      "reExport": false
+      "reExport": false,
+      "line": 6
     }
   ]
 }

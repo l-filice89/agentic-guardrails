@@ -39,7 +39,8 @@ export type FindingSource = z.infer<typeof findingSourceSchema>;
  * `findingId` is the line-drift-stable identity from `computeFindingId`;
  * `ruleId` and `enclosingSymbol` are carried on the Finding so the id is
  * auditable/recomputable from the Finding itself (no line numbers in the
- * hash input).
+ * hash input). An ABSENT `enclosingSymbol` (file-level identity) hashes as
+ * the empty string — recomputation maps the missing field to `""`.
  *
  * Strict object: unknown keys fail parse — a shape drift must surface as a
  * validation error plus a schemaVersion bump, never as silent stripping.

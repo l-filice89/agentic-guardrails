@@ -135,6 +135,20 @@ describe("loadConfig", () => {
     ]);
   });
 
+  it("reports a declared boundaries key as ONE deviation line (default: none declared)", () => {
+    const repo = tempRepo();
+    writeConfig(
+      repo,
+      "axioms: {}\nboundaries:\n  layers:\n    - name: app\n      paths: [src/app]\n    - name: lib\n      paths: [src/lib]\n  allowed:\n    app: [lib]\n",
+    );
+    const result = loadConfig(repo);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // Zero-silent-config: enabling the two boundaries-dependent structural
+    // rules must be visible at run start.
+    expect(result.deviations).toEqual(["boundaries: 2 layers declared (default: none)"]);
+  });
+
   it("reports axiom 5 overridden away from its blocking default", () => {
     const repo = tempRepo();
     writeConfig(repo, "axioms:\n  '5':\n    enforcement: advisory\n");

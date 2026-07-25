@@ -2,7 +2,11 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
+
+// ts-morph project parses (twice for the byte-identity assertion) can
+// exceed the 5s default under full-suite parallel load.
+vi.setConfig({ testTimeout: 30_000 });
 
 import {
   TypeScriptAdapter,
@@ -53,6 +57,7 @@ describe("TypeScriptAdapter import graph (golden fixture)", () => {
       dynamic: false,
       typeOnly: false,
       reExport: false,
+      line: 3,
     });
   });
 
@@ -63,6 +68,7 @@ describe("TypeScriptAdapter import graph (golden fixture)", () => {
       dynamic: false,
       typeOnly: false,
       reExport: false,
+      line: 4,
     });
     const chain = graph.fanOut("src/barrel.ts");
     expect(chain.coverage).toBe(1);
@@ -73,6 +79,7 @@ describe("TypeScriptAdapter import graph (golden fixture)", () => {
         dynamic: false,
         typeOnly: false,
         reExport: true,
+        line: 2,
       },
     ]);
   });
@@ -84,6 +91,7 @@ describe("TypeScriptAdapter import graph (golden fixture)", () => {
       dynamic: true,
       typeOnly: false,
       reExport: false,
+      line: 11,
     });
   });
 
@@ -94,6 +102,7 @@ describe("TypeScriptAdapter import graph (golden fixture)", () => {
       dynamic: false,
       typeOnly: true,
       reExport: false,
+      line: 7,
     });
   });
 
@@ -104,6 +113,7 @@ describe("TypeScriptAdapter import graph (golden fixture)", () => {
       dynamic: false,
       typeOnly: true,
       reExport: false,
+      line: 8,
     });
   });
 
@@ -115,6 +125,7 @@ describe("TypeScriptAdapter import graph (golden fixture)", () => {
       dynamic: false,
       typeOnly: false,
       reExport: false,
+      line: 2,
     });
     expect(graph.fanOut("typescript").data.count).toBe(0);
     // Resolved externals are verified — no degraded entry for them.
@@ -129,6 +140,7 @@ describe("TypeScriptAdapter import graph (golden fixture)", () => {
       dynamic: false,
       typeOnly: false,
       reExport: false,
+      line: 6,
     });
     expect(result.degraded).toContainEqual({
       reason: "unresolved bare specifier",

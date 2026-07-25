@@ -12,12 +12,16 @@ import os from "node:os";
 import path from "node:path";
 
 import { configSchema, conventionsFileSchema, corpusMapFileSchema } from "@agentic-guardrails/contracts";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { parse as parseYaml } from "yaml";
 
 import { DEFAULT_CONFIG_YAML } from "../config/config-loader.js";
 import { CONVENTIONS_YAML, CORPUS_MAP_YAML, runInit, type InitIo } from "./init.js";
 import { checkGitWiring, GITATTRIBUTES_UNION_LINE } from "./wiring.js";
+
+// git spawns + ts-morph seed builds legitimately exceed the 5s default
+// under full-suite parallel load.
+vi.setConfig({ testTimeout: 60_000 });
 
 const tempDirs: string[] = [];
 
