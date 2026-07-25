@@ -228,13 +228,11 @@ describe("runReview config plane (1.6)", () => {
     // gate verdict with the error count.
     expect(result.artifact.manifest.enforcement).toEqual({
       "1": { enforcement: "advisory" },
-      "5": { enforcement: "blocking" },
     });
     expect(result.artifact.gate).toEqual({
       pass: true,
       perAxiom: [
         { axiom: "1", enforcement: "advisory", errorFindings: 1, maxFindings: 0, pass: true },
-        { axiom: "5", enforcement: "blocking", errorFindings: 0, maxFindings: 0, pass: true },
       ],
     });
   });
@@ -862,7 +860,8 @@ describe("runReview manifest truth + wiring preflight (1.8)", () => {
     expect(result.wiringWarnings.join("\n")).toContain(".cache/ may be committed");
     expect(result.wiringWarnings.join("\n")).toContain("review artifacts may be committed");
     expect(result.wiringWarnings.join("\n")).toContain("the generated schema file may be committed");
-    expect(result.configWarnings).toEqual([]); // wiring is not the config plane
+    // Wiring is not the config plane: no config warnings here.
+    expect(result.configWarnings).toEqual([]);
     expect(result.degradedRun).toBe(false); // a warning is never a degradation
   });
 
@@ -871,6 +870,8 @@ describe("runReview manifest truth + wiring preflight (1.8)", () => {
     const result = await runReview({ cwd, analyzers: [cleanAnalyzer] });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
+    // Actually silent: no config warnings and no wiring lines for an
+    // uninitialized repo.
     expect(result.configWarnings).toEqual([]);
     expect(result.wiringWarnings).toEqual([]);
     // Uninitialized: sentinels + degradations exactly as before 1.8.

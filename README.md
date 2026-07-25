@@ -168,10 +168,23 @@ The v2 runtime lives in a pnpm-workspaces monorepo under `packages/`:
   dependency direction, unassigned files; see
   `docs/rules/axiom-1-structural.md` — the Axiom #3 cleanliness rule
   set — unreachable code, unused exports, copy-paste duplication, excessive
-  complexity; see `docs/rules/axiom-3-cleanliness.md` — and the Axiom #4
+  complexity; see `docs/rules/axiom-3-cleanliness.md` — the Axiom #4
   NFR structural rule set — unbounded `Promise.all` fan-out, sync fs I/O in
   async flow, `fetch` without an AbortSignal; all warnings by design, see
-  `docs/rules/axiom-4-nfr.md`) → aggregation
+  `docs/rules/axiom-4-nfr.md` — and the Axiom #5 security rule set —
+  hardcoded secrets via raw-text regex over pinned token formats (AWS
+  `AKIA`/`ASIA`, GitHub classic + fine-grained, Slack, OpenAI/Anthropic
+  `sk-`, PEM headers — scanned across EVERY changed file, not just
+  TypeScript: `.env`, `.json`, `.yaml`, Dockerfiles included, and caught even
+  in comments and unparseable files; vendor-published sample credentials are
+  allowlisted) plus a secret-named-assignment/comparison heuristic, injection
+  sinks (interpolated/concatenated strings into `query`/`execute`/`exec`;
+  constant-foldable concatenation never flags), dangerous APIs (`eval`
+  including indirect forms, the `Function` constructor with a string body,
+  string `setTimeout`/`setInterval`, `vm`), and unsafe deserialization
+  (`node-serialize` `unserialize`, `v8.deserialize`); errors only where
+  near-certain — FR-32 names axiom 5 as the gate-critical axiom and its rules
+  are error-dense, see `docs/rules/axiom-5-security.md`) → aggregation
   (overlapping same-file/same-axiom findings merged per FR-21: >50%-of-the-
   smaller-range overlap, strongest severity, source union, both messages
   preserved) → composition. Unchanged inputs are served from a
@@ -226,7 +239,7 @@ reference it for editor autocomplete:
 # yaml-language-server: $schema=./config.schema.json
 axioms:
   "1":
-    enforcement: advisory   # blocking | advisory | off (axiom "5" defaults to blocking)
+    enforcement: advisory   # blocking | advisory | off (every axiom defaults to blocking)
   "5":
     enforcement: blocking
     maxFindings: 2          # tolerate up to N error findings before exit 1 (default 0)

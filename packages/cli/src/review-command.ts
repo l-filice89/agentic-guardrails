@@ -15,10 +15,14 @@ import {
 } from "@agentic-guardrails/core";
 
 /** Explicit axiom → category labels (never inferred from a finding's ruleId
- * — an axiom with zero findings of its lead rule must still label correctly). */
-const AXIOM_CATEGORY: Record<string, string> = {
+ * — an axiom with zero findings of its lead rule must still label correctly).
+ * Exported for the coupling test against DEFAULT_ANALYZERS: registering an
+ * analyzer without a label here would print "uncategorized". */
+export const AXIOM_CATEGORY: Record<string, string> = {
   "1": "structural",
   "3": "cleanliness",
+  "4": "nfr",
+  "5": "security",
 };
 
 export async function reviewCommand(cwd: string): Promise<number> {

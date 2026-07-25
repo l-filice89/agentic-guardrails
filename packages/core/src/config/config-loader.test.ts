@@ -40,13 +40,14 @@ afterEach(() => {
 });
 
 describe("loadConfig", () => {
-  it("applies defaults when config.yaml is absent (axiom 5 blocking, 'absent' sentinel, no deviations)", () => {
+  it("applies defaults when config.yaml is absent (empty axioms map, 'absent' sentinel, no deviations)", () => {
     const repo = tempRepo();
     const result = loadConfig(repo);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.configPresent).toBe(false);
-    expect(result.config.axioms["5"]?.enforcement).toBe("blocking");
+    // Defaults are the gate's EFFECTIVE_DEFAULTS, not injected entries.
+    expect(result.config.axioms).toEqual({});
     expect(result.deviations).toEqual([]);
     expect(result.configHash).toBe(CONFIG_ABSENT_HASH); // literal sentinel, not sha256("")
     expect(result.warnings).toEqual([]);
@@ -205,7 +206,7 @@ describe("loadConfig", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.configPresent).toBe(true);
-    expect(result.config.axioms["5"]?.enforcement).toBe("blocking");
+    expect(result.config.axioms).toEqual({});
     expect(result.deviations).toEqual([]);
     // Empty-but-PRESENT hashes its bytes (sha256("")), distinguishable from "absent".
     expect(result.configHash).toBe(ABSENT_SHA256);
@@ -218,7 +219,7 @@ describe("loadConfig", () => {
     const result = loadConfig(repo);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.config.axioms["5"]?.enforcement).toBe("blocking");
+    expect(result.config.axioms).toEqual({});
     expect(result.deviations).toEqual([]);
   });
 

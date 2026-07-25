@@ -141,10 +141,10 @@ describe("guardrails review — config plane e2e", () => {
     // Auditability: the enforcement map + gate verdict live in the artifact —
     // the advisory bypass (pass despite 1 error finding) is durably declared.
     const manifest = artifact["manifest"] as Record<string, unknown>;
-    expect(manifest["enforcement"]).toEqual({
-      "1": { enforcement: "advisory" },
-      "5": { enforcement: "blocking" },
-    });
+    // Only what the consumer WROTE: unconfigured axioms take the gate's
+    // EFFECTIVE_DEFAULTS (blocking/0) and are declared in `gate.perAxiom`,
+    // not synthesized into the config map.
+    expect(manifest["enforcement"]).toEqual({ "1": { enforcement: "advisory" } });
     expect(manifest["configPresent"]).toBe(true);
     expect(manifest["configGitStatus"]).toBe("untracked");
     expect(artifact["gate"]).toEqual({

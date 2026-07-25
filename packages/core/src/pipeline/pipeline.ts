@@ -56,6 +56,7 @@ import {
 import { axiom1Structural } from "../analyzers/axiom1-structural.js";
 import { axiom3Cleanliness } from "../analyzers/axiom3-cleanliness.js";
 import { axiom4Nfr } from "../analyzers/axiom4-nfr.js";
+import { axiom5Security } from "../analyzers/axiom5-security.js";
 import type { ChangedFilesCache, ChangedFilesParse } from "../analyzers/changed-files.js";
 import { DeterministicCache, loadCacheSecret } from "../cache/deterministic-cache.js";
 import { evaluateGate, loadConfig, type GateResult } from "../config/config-loader.js";
@@ -119,6 +120,12 @@ export interface AnalyzerContext {
   /** Changed analyzable TS files (present on disk), repo-root-relative,
    * `/`-separated, sorted. */
   changedFiles: readonly string[];
+  /** ALL changed files present on disk (the raw pre-TS-filter list: .env,
+   * .json, .yaml, .md, Dockerfiles, declarations …) — the axiom-5 secret
+   * scan iterates this so a leaked credential in ANY changed file is seen.
+   * Optional for bare unit-test contexts; absent → falls back to
+   * `changedFiles`. */
+  allChangedFiles?: readonly string[];
   /** Leaf tsconfigs to analyze: the root tsconfig itself, or — for a
    * solution-style root — each referenced project's tsconfig. */
   tsconfigPaths: readonly string[];
@@ -156,12 +163,14 @@ export const DEFAULT_ANALYZERS: readonly Analyzer[] = [
   axiom1Structural,
   axiom3Cleanliness,
   axiom4Nfr,
+  axiom5Security,
 ];
 
-/** Axiom ids the pipeline treats as known BEYOND the registered analyzers:
- * axiom 5 (security) is configurable before its analyzer lands (Epic 3).
+/** Axiom ids the pipeline treats as known BEYOND the registered analyzers.
+ * Empty since 1.12 (axiom 5's analyzer landed) — kept as the seam for any
+ * future axiom that becomes configurable before its analyzer exists.
  * Single source for the unknown-axiom warning and the init questionnaire. */
-export const ANALYZERLESS_KNOWN_AXIOMS: readonly string[] = ["5"];
+export const ANALYZERLESS_KNOWN_AXIOMS: readonly string[] = [];
 
 /** Two analyzers registered for one axiom would silently clobber each other
  * in the per-axiom result map — a caller bug, rejected loudly and typed. */
@@ -392,7 +401,10 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewRunRes
         JSON.stringify([
           "findings",
           axiom,
-          analyzableHashes,
+          // Axiom 5's regex tier reads EVERY changed file, so its key must
+          // cover them all — a changed .env must invalidate its entry. The
+          // other axioms see only analyzable TS.
+          axiom === "5" ? fileHashes : analyzableHashes,
           [...graphKeys.values()].sort(),
           "uncommitted",
           config.boundaries ?? null,
@@ -421,6 +433,7 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewRunRes
   const context: AnalyzerContext = {
     repoRoot: root.value,
     changedFiles: analyzableFiles,
+    allChangedFiles: changedFiles,
     tsconfigPaths: discovery.tsconfigPaths,
     ...(config.boundaries === undefined ? {} : { boundaries: config.boundaries }),
     graphCache,

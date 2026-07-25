@@ -5,8 +5,9 @@ export const enforcementSchema = z.enum(["blocking", "advisory", "off"]);
 
 /**
  * Engine configuration (feeds the Story 1.6 config plane). Keyed by axiom
- * id; axiom #5 (type-system integrity) defaults to `blocking`, everything
- * else defaults to nothing until the consumer's config file sets it.
+ * id; the schema carries only what the consumer wrote — every unconfigured
+ * axiom gets the gate's effective defaults (`blocking`, `maxFindings: 0`)
+ * downstream (core's EFFECTIVE_DEFAULTS).
  */
 const axiomEntrySchema = z
   .strictObject({
@@ -116,19 +117,8 @@ export const configSchema = z.strictObject({
   axioms: z
     .record(z.string(), axiomEntrySchema)
     .default({})
-    // Axiom #5 defaults to blocking; an explicit entry for "5" wins. The
-    // return type is annotated so the inferred Config keeps its index
-    // signature (the literal spread would otherwise narrow it to `{"5":...}`).
-    .transform(
-      (axioms): Record<string, AxiomEntry> => ({
-        "5": { enforcement: "blocking" as const },
-        ...axioms,
-      }),
-    )
-    // Surfaced via .describe so the generated JSON Schema (io: "input")
-    // carries the default that the transform makes invisible to it.
     .describe(
-      'Per-axiom enforcement, keyed by axiom id. Axiom "5" (security) defaults to "blocking" when omitted; an explicit entry wins.',
+      'Per-axiom enforcement, keyed by axiom id. Every axiom defaults to "blocking" (maxFindings 0) when omitted; an explicit entry wins.',
     ),
 });
 

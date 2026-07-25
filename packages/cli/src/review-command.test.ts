@@ -1,8 +1,8 @@
 import { computeFindingId, type Finding } from "@agentic-guardrails/contracts";
-import type { ReviewArtifact } from "@agentic-guardrails/core";
+import { DEFAULT_ANALYZERS, type ReviewArtifact } from "@agentic-guardrails/core";
 import { describe, expect, it } from "vitest";
 
-import { formatSummary } from "./review-command.js";
+import { AXIOM_CATEGORY, formatSummary } from "./review-command.js";
 
 const MANIFEST = {
   schemaVersion: 1,
@@ -117,5 +117,13 @@ describe("formatSummary", () => {
     const findingAt = out.indexOf("axiom 1 · structural");
     expect(headerAt).toBeGreaterThanOrEqual(0);
     expect(findingAt).toBeGreaterThan(headerAt);
+  });
+});
+
+describe("AXIOM_CATEGORY coupling", () => {
+  it("every registered analyzer axiom has an explicit label (never 'uncategorized')", () => {
+    for (const analyzer of DEFAULT_ANALYZERS) {
+      expect(AXIOM_CATEGORY[analyzer.axiom]).toBeDefined();
+    }
   });
 });

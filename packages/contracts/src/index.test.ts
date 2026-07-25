@@ -328,10 +328,10 @@ describe("findingSchema merged-source array (1.7)", () => {
 });
 
 describe("configSchema", () => {
-  it("defaults axiom 5 to blocking", () => {
+  it("parses an empty config to an empty axioms map (defaults live downstream in EFFECTIVE_DEFAULTS)", () => {
     const parsed = configSchema.safeParse({});
     expect(parsed.success).toBe(true);
-    expect(parsed.data?.axioms["5"]?.enforcement).toBe("blocking");
+    expect(parsed.data?.axioms).toEqual({});
   });
 
   it("rejects unknown enforcement values and exports a JSON Schema", () => {

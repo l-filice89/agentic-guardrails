@@ -21,3 +21,6 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-11-axiom-4-nfr-analyzer-structural-tier.md`
   summary: Global RULESET_VERSION cold-starts every axiom cache on any single-axiom rule change (bumping to 4 invalidated axioms 1 and 3 whose rules were untouched). Decide per-axiom ruleset versioning before more analyzers land. Candidate owner: pre-Epic-3 (1.19 or epic-end sweep).
   evidence: Review finding - three analyzers now share one version string; collateral invalidation grows linearly with analyzer count and is undocumented in the manifest.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-12-axiom-5-security-analyzer-regex-ast-tier.md`
+  summary: Dogfood self-gate - the repo's own security fixtures contain pattern-matching fake credentials (error tier deliberately fires in test paths), so any dogfood review touching tests/__fixtures__/security-rules exits 1. 1.18 (dogfood CI) must decide the surface: a repo-level path-exclusion config, a maxFindings allowance, or accepting the gate on fixture changes. Candidate owner: story 1.18.
+  evidence: Review finding - published-sample allowlist (P9) covers vendor-documented fakes only; the oracle fixtures intentionally use non-allowlisted shapes so they keep producing findings, which means they gate the repo that ships them.

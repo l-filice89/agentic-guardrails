@@ -48,13 +48,12 @@ import {
   Node,
   SyntaxKind,
   type CallExpression,
-  type Expression,
-  type Identifier,
   type SourceFile,
   type Symbol as MorphSymbol,
 } from "ts-morph";
 
 import type { Analyzer, AnalyzerContext, AnalyzerResult } from "../pipeline/pipeline.js";
+import { isGlobalRef, memberAccess } from "./ast-helpers.js";
 import { enclosingSymbolName, FUNCTION_LIKE_KINDS } from "./axiom3-cleanliness.js";
 import { compare, parseChangedFiles } from "./changed-files.js";
 
@@ -91,53 +90,6 @@ export const axiom4Nfr: Analyzer = {
     return { findings, degraded: [...parse.degraded] };
   },
 };
-
-// ---- global-binding checks (nfr false-positive guard) ----------------------
-
-/** Objects whose property access reaches the global scope. */
-const GLOBAL_OBJECTS = new Set(["globalThis", "window", "self"]);
-
-/** True when the identifier's symbol has ANY declaration in the changed
- * file itself — a parameter, local variable, function, class, or import
- * (anything but the ambient global). An unresolvable symbol (no libs) is
- * treated as the global: the hazard forms must stay positive. */
-function hasLocalDeclaration(id: Identifier): boolean {
-  const declarations = id.getSymbol()?.getDeclarations() ?? [];
-  return declarations.some((d) => d.getSourceFile() === id.getSourceFile());
-}
-
-/** `expr.member` / `expr["member"]` → the target expression + member name.
- * Bracket access resolves only for a string LITERAL name — a computed name
- * is not statically decidable. */
-function memberAccess(node: Node): { target: Expression; member: string } | undefined {
-  if (Node.isPropertyAccessExpression(node)) {
-    return { target: node.getExpression(), member: node.getName() };
-  }
-  if (Node.isElementAccessExpression(node)) {
-    const arg = node.getArgumentExpression();
-    if (arg !== undefined && Node.isStringLiteral(arg)) {
-      return { target: node.getExpression(), member: arg.getLiteralValue() };
-    }
-  }
-  return undefined;
-}
-
-/** The AMBIENT global `name`: a bare identifier with no local declaration,
- * or `globalThis.name` / `window.name` / `self.name` where the base itself
- * is not locally shadowed. */
-function isGlobalRef(node: Node, name: string): boolean {
-  if (Node.isIdentifier(node)) {
-    return node.getText() === name && !hasLocalDeclaration(node);
-  }
-  const access = memberAccess(node);
-  return (
-    access !== undefined &&
-    access.member === name &&
-    Node.isIdentifier(access.target) &&
-    GLOBAL_OBJECTS.has(access.target.getText()) &&
-    !hasLocalDeclaration(access.target)
-  );
-}
 
 // ---- sync-IO import tracking (nfr/sync-io-in-async substrate) --------------
 

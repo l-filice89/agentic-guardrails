@@ -185,10 +185,10 @@ describe("guardrails review — axiom-3 cleanliness rule set e2e (Story 1.10)", 
     const second = readSingleArtifact(repo);
     const cache = (second.artifact["manifest"] as Record<string, unknown>)["cache"];
     // Exactly ONE graph hit (one tsconfig; the run-local memo covers the
-    // second graph consumer) and THREE findings misses (axioms 1, 3, 4 —
-    // 1.11): the findings were recomputed from the deserialized graph, not
+    // second graph consumer) and FOUR findings misses (axioms 1, 3, 4, 5 —
+    // 1.12): the findings were recomputed from the deserialized graph, not
     // served whole.
-    expect(cache).toMatchObject({ hits: 1, misses: 3, invalid: 0 });
+    expect(cache).toMatchObject({ hits: 1, misses: 4, invalid: 0 });
     expect(normalizeCacheTruth(second.raw)).toBe(normalizeCacheTruth(first.raw));
   });
 

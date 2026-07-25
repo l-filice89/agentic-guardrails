@@ -10,6 +10,53 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Axiom #5 security analyzer (Story 1.12, `rulesetVersion: 5`, documented in
+  `docs/rules/axiom-5-security.md`): the fourth registered deterministic
+  analyzer — the one FR-32 names as gate-critical (every axiom defaults to
+  blocking; axiom 5's rule set is error-dense) — with four rules across two
+  source tiers. `security/hardcoded-secret` (`source: "regex"`) scans the RAW
+  TEXT of EVERY changed file — not just the analyzable-TypeScript subset the
+  AST rules see, so a secret in a changed `.env`, `.json`, `.yaml`, `.md`,
+  Dockerfile, or `.d.ts` is caught, as are secrets in comments and
+  unparseable files: ERROR for pinned near-certain token formats (AWS
+  `AKIA…`/`ASIA…` ids, GitHub `gh[pousr]_` tokens and `github_pat_`
+  fine-grained PATs, Slack `xox[baprse]…` tokens incl. `xoxe` refresh
+  tokens, OpenAI `sk-`/`sk-proj-` keys, Anthropic `sk-ant-` keys,
+  private-key PEM headers — these fire even in `.test.`/`__fixtures__`
+  paths), WARNING for the heuristic ≥16-char literal assigned OR compared
+  (`===`/`!==` — the hardcoded-credential backdoor spelling) to a
+  secret-named identifier (name must END in a secret word-part, so
+  `tokenizerConfig`/`passwordHintText` never match; whole-text scan catches
+  prettier-wrapped assignments; exempt: `process.env`/`import.meta.env`
+  references, placeholders anchored at the value start, basename-anchored
+  test paths). Vendor-PUBLISHED sample credentials (AWS's
+  `AKIAIOSFODNN7EXAMPLE`, GitHub's documented sample PAT) are allowlisted —
+  they are published non-secrets. Files over 1 MiB are skipped with a typed
+  degradation, the scan honors the phase-1 budget signal between files, and
+  matched values are never echoed into messages. `security/injection-sink`
+  (warning — the tier cannot prove taint): interpolated/concatenated strings
+  into `query`/`execute` member calls or imported `child_process`
+  `exec`/`execSync`; static strings never flag, including constant-foldable
+  literal+literal concatenation. `security/dangerous-api` (error — the eval
+  family has no legitimate application-code idiom): `eval` incl. indirect
+  `(0, eval)(…)`/`(eval)(…)` forms, the `Function` constructor in every form
+  (`new`, bare call, `globalThis.`/`window.`/`self.`) when its BODY — the
+  LAST argument — is a string, so `new Function("x", bodyVar)` never flags;
+  string or concatenated `setTimeout`/`setInterval` arguments; `vm`
+  `runIn*`/`compileFunction` and `new vm.Script`.
+  `security/unsafe-deserialization`: `unserialize` from a
+  `node-serialize`-family import errors (known RCE vector); `v8.deserialize`
+  warns (legitimate for trusted IPC). AST rules ride the shared
+  changed-files parse with the 1.11 shadowing-immune symbol-resolved
+  bindings (a local `eval` wrapper or shadowed import never flags); analyzed
+  code is parsed as data, never executed (sentinel-tested). `AnalyzerContext`
+  gains `allChangedFiles` (the raw pre-filter change list) for the secret
+  scan, and axiom 5's findings cache key covers every changed file's content
+  hash. Axiom 5 leaves `ANALYZERLESS_KNOWN_AXIOMS` (now empty); the violation
+  fixture's oracle run exits 1 under default config (blocking, FR-32).
+  ENGINE_VERSION stays 0.0.3 (no cached-payload schema change) —
+  RULESET_VERSION alone invalidates the findings cache.
+
 - Axiom #4 NFR analyzer (Story 1.11, `rulesetVersion: 4`, documented in
   `docs/rules/axiom-4-nfr.md`): a third registered deterministic analyzer
   with three structural-tier rules over changed files (no import graph) —
@@ -232,6 +279,25 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   `access: "public"`) for future multi-package SemVer releases; no publish
   workflow yet (nothing is published before M4).
 - `docs/adr/ADR-002-repo-layout.md` and `docs/adr/ADR-005-contracts-package.md`.
+
+### Changed
+- Config plane: `configSchema` no longer injects a synthetic
+  `axioms: {"5": {enforcement: "blocking"}}` entry into every parsed config.
+  The gate's `EFFECTIVE_DEFAULTS` already blanket every unconfigured axiom
+  with `blocking`/`maxFindings: 0`, so the injection changed no gating —
+  its only observable effect was a spurious "axioms.5 matches no known
+  axiom" warning and a phantom entry in `manifest.enforcement`. A parsed
+  config now carries exactly what the consumer wrote
+  (`config.schema.json` regenerates accordingly).
+- The CLI's axiom-4 report label was `nfr` all along but is now pinned by a
+  coupling test: every axiom in `DEFAULT_ANALYZERS` must have an explicit
+  `AXIOM_CATEGORY` label — registering an analyzer without one would print
+  "uncategorized".
+
+### Fixed
+- Docs/README/rule-doc wording: "the ONE axiom that defaults to blocking"
+  was false — `EFFECTIVE_DEFAULTS` makes EVERY axiom blocking by default;
+  axiom 5's distinction is FR-32 naming it plus its error-dense rule set.
 
 ## [1.0.0] - 2026-04-16
 

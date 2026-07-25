@@ -23,11 +23,12 @@ import type { Degradation, RunManifest } from "@agentic-guardrails/contracts";
 // `names` — the unused-export usage substrate); same clean-miss rationale.
 export const ENGINE_VERSION = "0.0.3";
 
-/** Version of the deterministic ruleset ("4": Story 1.11 adds the three-rule
- * axiom-4 NFR structural set alongside the 1.9 axiom-1 and 1.10 axiom-3
- * sets). ENGINE_VERSION stays at 0.0.3 on purpose: 1.11 changes no cached
- * payload schema — RULESET_VERSION alone invalidates the findings cache. */
-export const RULESET_VERSION = "4";
+/** Version of the deterministic ruleset ("5": Story 1.12 adds the four-rule
+ * axiom-5 security set — regex + AST tiers — alongside the 1.9 axiom-1,
+ * 1.10 axiom-3, and 1.11 axiom-4 sets). ENGINE_VERSION stays at 0.0.3 on
+ * purpose: 1.12 changes no cached payload schema — RULESET_VERSION alone
+ * invalidates the findings cache. */
+export const RULESET_VERSION = "5";
 
 /** sha256 of the empty string — the sentinel for "this input does not exist yet". */
 export const ABSENT_SHA256 = createHash("sha256").update("").digest("hex");
