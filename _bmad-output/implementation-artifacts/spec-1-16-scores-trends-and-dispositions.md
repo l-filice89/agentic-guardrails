@@ -4,7 +4,7 @@ type: 'feature'
 created: '2026-07-28'
 status: 'done'
 baseline_revision: d79c21d0f52dbcfa6ee5a5b0d5eb08f04a7b7a2f
-final_revision: ''
+final_revision: 0fc7a204b51b91d6aadbb91e3da45ea91a87e3dc
 review_loop_iteration: 0
 followup_review_recommended: true # AUTO-FORCED: four HIGH inline findings (denominator counting the engine's own committed output; delta unreachable for ref scopes; torn-tail repair deleting a valid record; prototype-key answers writing schema-invalid committed records) + accepted OVERSIZED flag
 context: []
