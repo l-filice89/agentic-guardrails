@@ -30,8 +30,10 @@
  *
  * Ownership discipline (this module deletes things, so the bound is the
  * design): a directory is reclaimable only when it is (a) prefixed
- * `agtwt-`, (b) inside THIS repository's namespaced base directory, (c) not
- * in use by this process, (d) not the invoking worktree, (e) not locked by a
+ * `agtwt-`, (b) inside THIS repository's namespaced base directory, (c) not in
+ * use by this process (`liveWorktrees`) NOR by another live process (the
+ * `.agtwt-live` pid marker — registered-but-unidentifiable is declared
+ * `in-use`, never removed), (d) not the invoking worktree, (e) not locked by a
  * human, and (f) either unregistered-with-no-`.git` or pointing its `.git`
  * back at this repository's common git dir. Anything else is DECLARED, not
  * deleted.
@@ -46,7 +48,12 @@ import { lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync 
 import os from "node:os";
 import path from "node:path";
 
-import { gitCommand, type GitResult } from "./git.js";
+import { gitCommand, refProblem, type GitResult } from "./git.js";
+
+// The ref guard lives beside the spawn it protects (`git.ts`, 1.15) so the
+// ref-diffing helpers cannot grow a second path to git that skips it; it is
+// re-exported here for 1.14's callers.
+export { refProblem };
 
 /** Directory-name prefix that marks a worktree as created by this tool.
  * Reclamation is bounded to `prefix` + the tool's base dir — a human-created
@@ -88,7 +95,11 @@ export type WorktreeDegradationKind =
   | "removal-failed"
   | "reclaim-failed"
   | "locked"
-  | "unowned";
+  | "unowned"
+  /** A REGISTERED tool worktree whose liveness cannot be established (no
+   * readable pid marker): possibly another process's live scope, so it is
+   * declared rather than deleted. */
+  | "in-use";
 
 export interface WorktreeDegradation {
   kind: WorktreeDegradationKind;
@@ -131,6 +142,7 @@ const DEGRADATION_KINDS: readonly WorktreeDegradationKind[] = [
   "reclaim-failed",
   "locked",
   "unowned",
+  "in-use",
 ];
 
 function isDegradationKind(value: string | undefined): value is WorktreeDegradationKind {
@@ -146,17 +158,6 @@ export interface WorktreeEntry {
 // ---------------------------------------------------------------------------
 // git wrapper additions
 // ---------------------------------------------------------------------------
-
-/** A ref beginning with `-` is consumed by git as an option. Refs come from
- * PR/branch input, so this is an argument-injection boundary: rejected with a
- * typed reason, and every ref is additionally passed after `--`. */
-export function refProblem(ref: string): string | undefined {
-  if (ref.length === 0) return "ref is empty";
-  if (ref.startsWith("-")) {
-    return `ref ${JSON.stringify(ref)} begins with "-"; git would parse it as an option`;
-  }
-  return undefined;
-}
 
 export function worktreeAdd(repoRoot: string, worktreePath: string, ref: string): GitResult<string> {
   const problem = refProblem(ref);
@@ -238,13 +239,16 @@ function isInside(child: string, parent: string): boolean {
 
 /**
  * `\\?\` prefix so `fs` can reach a path past the Win32 `MAX_PATH` limit of
- * 260. The threshold is 240, not 260: `MAX_PATH` counts the terminating NUL
+ * 260. Exported since 1.15: the pipeline reads reviewed files out of a
+ * worktree, where a deep repo-relative path plus the base can cross the limit
+ * — and an `fs` failure there would be misread as "the file was deleted".
+ * The threshold is 240, not 260: `MAX_PATH` counts the terminating NUL
  * and a directory being created must leave room for `\` plus an 8.3 name, so
  * the documented safe headroom for a DIRECTORY is `MAX_PATH - 12`. UNC paths
  * take the `\\?\UNC\server\share\…` spelling — `\\?\\\server\share` is not a
  * valid Win32 path.
  */
-function fsPath(target: string): string {
+export function fsPath(target: string): string {
   const resolved = path.resolve(target);
   if (process.platform !== "win32" || resolved.length < 240 || resolved.startsWith("\\\\?\\")) {
     return resolved;
@@ -289,10 +293,64 @@ function present(target: string): boolean {
  * reclaim-before-create step can never delete a live sibling scope — the
  * intended path is registered BEFORE `worktree add` so a concurrent in-process
  * sweep cannot catch the creation window.
- * ponytail: in-process only — two guardrails processes sharing one repo would
- * still race; add a pid lock file per worktree if parallel runs ship.
+ *
+ * In-process only BY DESIGN; the cross-process half is {@link LIVE_MARKER_NAME}
+ * below, which is what a sibling process can actually see.
  */
 const liveWorktrees = new Set<string>();
+
+/**
+ * Cross-process liveness marker: a file inside each created worktree holding
+ * the creating process's pid.
+ *
+ * Without it, `liveWorktrees` is the ONLY liveness signal and it is
+ * in-process — so a second `guardrails` run on the SAME repository sees the
+ * first run's registered, correctly-owned, unlocked worktree as residue and
+ * removes it mid-analysis. (The repo-namespaced base already stops that
+ * happening ACROSS repositories; 1.15 is the first consumer that makes the
+ * same-repo axis reachable.)
+ *
+ * ponytail: pid liveness, not a lease — a pid recycled by an unrelated
+ * process keeps its worktree un-reclaimable until a human removes it. A
+ * timestamped lease is the upgrade if that ever bites.
+ */
+export const LIVE_MARKER_NAME = ".agtwt-live";
+
+type Liveness = "live" | "dead" | "unknown";
+
+/** Reads the pid marker and asks the OS whether that process still exists.
+ * `unknown` (no marker, unreadable, or unparseable) is deliberately NOT
+ * "dead": on a REGISTERED worktree the caller treats it as possibly-live. */
+function livenessOf(worktreePath: string): Liveness {
+  let raw: string;
+  try {
+    raw = readFileSync(fsPath(path.join(worktreePath, LIVE_MARKER_NAME)), "utf8");
+  } catch {
+    return "unknown";
+  }
+  const pid = Number.parseInt(raw.trim(), 10);
+  if (!Number.isInteger(pid) || pid <= 0) return "unknown";
+  try {
+    // Signal 0 tests existence without delivering anything (Windows included).
+    process.kill(pid, 0);
+    return "live";
+  } catch (error) {
+    // EPERM = the process exists but belongs to another user: still LIVE.
+    return (error as NodeJS.ErrnoException).code === "EPERM" ? "live" : "dead";
+  }
+}
+
+/** Drops the marker into a freshly created worktree. A failure is not fatal:
+ * this process still holds the path in `liveWorktrees`, and a sibling seeing
+ * a registered worktree with no readable marker declares it rather than
+ * removing it. */
+function writeLiveMarker(worktreePath: string): void {
+  try {
+    writeFileSync(fsPath(path.join(worktreePath, LIVE_MARKER_NAME)), `${process.pid}\n`);
+  } catch {
+    // Declared by the reader, not here — see livenessOf.
+  }
+}
 
 // ---------------------------------------------------------------------------
 // base directory
@@ -654,16 +712,26 @@ async function reclaimIn(
   // Deduped by CANONICAL path: git's reported spelling and readdir's can
   // differ in case on Windows, and the same worktree twice burns the retry
   // budget twice.
-  const targets = new Map<string, { path: string; registered: boolean; directory: boolean }>();
-  const add = (target: string, registered: boolean, directory: boolean): void => {
+  interface Target {
+    path: string;
+    registered: boolean;
+    directory: boolean;
+    /** `git worktree lock` — a human saying "do not remove this". */
+    locked: boolean;
+  }
+  const targets = new Map<string, Target>();
+  const add = (target: string, registered: boolean, directory: boolean, locked = false): void => {
     const key = canonical(target);
     const existing = targets.get(key);
-    if (existing === undefined) targets.set(key, { path: target, registered, directory });
-    else existing.registered ||= registered;
+    if (existing === undefined) targets.set(key, { path: target, registered, directory, locked });
+    else {
+      existing.registered ||= registered;
+      existing.locked ||= locked;
+    }
   };
 
   for (const entry of list.value) {
-    if (isToolWorktree(entry.path, baseDirs)) add(entry.path, true, true);
+    if (isToolWorktree(entry.path, baseDirs)) add(entry.path, true, true, entry.locked);
   }
   for (const baseDir of baseDirs) {
     sweepProbes(baseDir, degradations);
@@ -674,11 +742,30 @@ async function reclaimIn(
   }
 
   for (const key of [...targets.keys()].sort()) {
-    const target = targets.get(key) as { path: string; registered: boolean; directory: boolean };
+    const target = targets.get(key) as Target;
     if (liveWorktrees.has(key)) continue;
     // Never reclaim the invoking worktree, whatever it is called or where it
     // sits: deleting it out from under the run is the worst outcome here.
     if (key === canonical(repoRoot)) continue;
+    const liveness = livenessOf(target.path);
+    // Another PROCESS's live scope. Silent, not declared: a concurrent run is
+    // normal operation, and a reclaim degradation is a REAL degradation (exit
+    // 2), so declaring it would let one run fail another's exit code.
+    if (liveness === "live") continue;
+    // Registered, on disk, and unidentifiable — the creation window between
+    // `worktree add` and the marker write, an older residue, or a marker we
+    // cannot read. Removing it could destroy a live sibling's analysis, so it
+    // is declared and left for a human (`git worktree remove`). A
+    // registration whose DIRECTORY is gone is nobody's live scope, and a
+    // human-LOCKED one gets the more specific `locked` declaration below.
+    if (liveness === "unknown" && target.registered && !target.locked && present(target.path)) {
+      degradations.push({
+        kind: "in-use",
+        subject: target.path,
+        reason: `registered worktree with no readable ${LIVE_MARKER_NAME} marker — liveness unknown, declared rather than removed`,
+      });
+      continue;
+    }
     if (!target.registered && !ownedByRepo(target.path, commonDir)) {
       degradations.push({
         kind: "unowned",
@@ -791,6 +878,10 @@ export async function withWorktree<T>(
     if (cleanup.degradation) degradations.push(cleanup.degradation);
     return { ok: false, reason: added.reason, worktreePath, degradations };
   }
+
+  // Cross-process liveness, written as early as possible after the add: a
+  // sibling process's sweep must see "in use", not "residue".
+  writeLiveMarker(worktreePath);
 
   let value: T | undefined;
   let thrown: unknown;

@@ -40,6 +40,7 @@ import {
   type Boundaries,
   type Degradation,
   type Finding,
+  type PrMetadata,
   type ReviewArtifact,
   type RunManifest,
 } from "@agentic-guardrails/contracts";
@@ -60,14 +61,26 @@ import { axiom5Security } from "../analyzers/axiom5-security.js";
 import { axiom6Conformance } from "../analyzers/axiom6-conformance.js";
 import type { ChangedFilesCache, ChangedFilesParse } from "../analyzers/changed-files.js";
 import { DeterministicCache, loadCacheSecret } from "../cache/deterministic-cache.js";
-import { evaluateGate, loadConfig, type GateResult } from "../config/config-loader.js";
-import { fileGitStatus, headSha, repoRoot, uncommittedFiles } from "../git/git.js";
+import {
+  evaluateGate,
+  loadConfig,
+  type GateResult,
+  type LoadConfigResult,
+} from "../config/config-loader.js";
+import { fileGitStatus, headSha, repoRoot, revParse } from "../git/git.js";
+import {
+  fsPath,
+  toManifestDegradation,
+  withWorktree,
+  worktreeDegradationsOf,
+} from "../git/worktree.js";
 import { ImportGraph } from "../graph/import-graph.js";
 import { checkGitWiring } from "../init/wiring.js";
 import {
   readStructuralSeedFile,
   type StructuralSeedRead,
 } from "../knowledge/structural-seed.js";
+import { ghPrMetadata, type GhRunner } from "./gh-metadata.js";
 import {
   ABSENT_SHA256,
   buildRunManifest,
@@ -76,6 +89,7 @@ import {
   RULESET_VERSION,
 } from "./manifest.js";
 import { mergeFindings } from "./merge.js";
+import { changeSetFor, resolveScope, type ResolvedScope, type ScopeRequest } from "./scope.js";
 
 export type { ReviewArtifact } from "@agentic-guardrails/contracts";
 
@@ -201,6 +215,17 @@ export class DuplicateAnalyzerError extends Error {
   }
 }
 
+/** A change set git could not produce. Thrown rather than returned because the
+ * change-set read happens inside the worktree callback (which has no result
+ * channel); `runReview` converts it back into the typed preflight failure it
+ * has always been, so the worktree still gets removed on the way out. */
+class ChangeSetError extends Error {
+  constructor(reason: string) {
+    super(reason);
+    this.name = "ChangeSetError";
+  }
+}
+
 export type ReviewRunResult =
   | { ok: false; code: "preflight" | "config" | "invalid-artifact"; message: string }
   | {
@@ -237,16 +262,81 @@ export type ReviewRunResult =
 
 export interface RunReviewOptions {
   cwd: string;
+  /** What to review (1.15). Absent → the uncommitted working tree: bare
+   * `guardrails review` behaves exactly as it did before scopes existed. */
+  scope?: ScopeRequest;
   /** Test seam; defaults to the registered deterministic analyzers. */
   analyzers?: readonly Analyzer[];
   /** Test seam; defaults to PHASE1_BUDGET_MS. */
   phase1BudgetMs?: number;
   /** Test seam; defaults to `~/.agentic-guardrails/cache-secret`. */
   cacheSecretPath?: string;
+  /** Test seam; preferred worktree base ROOT (1.14 `WorktreeBaseOptions`). */
+  worktreeBaseDir?: string;
+  /** Test seam; the `gh` invocation. Defaults to spawning the real `gh` — a
+   * test injects a stub so no test run can reach a network. */
+  gh?: GhRunner;
+}
+
+type LoadedConfig = Extract<LoadConfigResult, { ok: true }>;
+
+/**
+ * The ANALYZE/WRITE split (1.15) — the structural centre of scoped review.
+ * `analyzeRoot` is where the reviewed content lives (a temporary worktree for
+ * a ref that is not HEAD); `outputRoot` is ALWAYS the invoking repository:
+ * config, cache, corpus seed, git wiring and the artifact. A worktree is
+ * deleted, so anything written inside it is gone — the split enforces that
+ * structurally rather than by convention.
+ *
+ * Hard invariant: no absolute path from `analyzeRoot` may enter a cache key, a
+ * runId, an artifact field or a finding location. A temp worktree path is
+ * nondeterministic; a single leak would kill warm-cache reuse and artifact
+ * byte-identity silently. Everything hashed or emitted is `analyzeRoot`-
+ * relative and POSIX-normalized.
+ */
+interface AnalysisInputs {
+  analyzeRoot: string;
+  outputRoot: string;
+  scope: ResolvedScope;
+  loaded: LoadedConfig;
+  options: RunReviewOptions;
+  /** The `gh` metadata outcome (metadata or the reason it is missing) — an
+   * artifact input that is not derived from the reviewed content, so it has to
+   * reach the runId. Undefined for every non-PR scope. */
+  ghIdentity?: unknown;
+}
+
+/**
+ * Everything ONE analysis pass produces. Composition (artifact + manifest +
+ * schema validation) happens OUTSIDE this and therefore outside any worktree,
+ * because a worktree's removal degradation is only known after the callback
+ * returns — composing inside would mean a leak that can never reach the
+ * artifact it belongs in.
+ */
+interface AnalysisOutcome {
+  changedFiles: string[];
+  deletedFiles: string[];
+  findings: Finding[];
+  runDegraded: Degradation[];
+  declaredOnly: Degradation[];
+  cache: NonNullable<RunManifest["cache"]>;
+  corpusSeedHash?: string;
+  ledgerHash?: string;
+  corpusHash?: string;
+  runId: string;
+  /** Phase-1 membership truth for the declared assembly. */
+  phase1: { members: string[]; ran: boolean; reason?: string };
+  /** Axioms that actually ran (gate input) and those configured `off`. */
+  enabledAxioms: string[];
+  axiomsOff: string[];
+  /** Every REGISTERED axiom, `off` included — the unknown-axiom warning
+   * compares against registration, not enablement. */
+  registeredAxioms: string[];
 }
 
 export async function runReview(options: RunReviewOptions): Promise<ReviewRunResult> {
   // ---- Phase 0: preflight -------------------------------------------------
+  // The invoking repository is the OUTPUT root, always.
   const root = repoRoot(options.cwd);
   if (!root.ok) {
     const message =
@@ -257,50 +347,342 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewRunRes
           : root.reason;
     return { ok: false, code: "preflight", message };
   }
-  const changed = uncommittedFiles(options.cwd);
-  if (!changed.ok) return { ok: false, code: "preflight", message: changed.reason };
+  const outputRoot = root.value;
+
+  // Scope resolution (1.15) runs against the INVOKING repo's refs — local
+  // only, no network. An unresolvable scope (missing PR ref, no default base,
+  // hostile ref) is a typed preflight failure before any worktree is created.
+  const resolved = resolveScope(outputRoot, options.scope ?? { kind: "uncommitted" });
+  if (!resolved.ok) return { ok: false, code: "preflight", message: resolved.reason };
+  const scope = resolved.scope;
 
   // Config plane (1.6): the ONLY config read in the pipeline. An invalid
   // config is a typed failure (exit 2 at the CLI) — never a silent fallback.
-  const loaded = loadConfig(root.value);
+  const loaded = loadConfig(outputRoot);
   if (!loaded.ok) return { ok: false, code: "config", message: loaded.message };
   const config = loaded.config;
 
   // Preflight git-wiring check (1.8): warnings naming the consequence when
   // an initialized repo lost its `.gitattributes`/`.gitignore` lines —
   // never exit 2, and silent for an uninitialized repo (no folder).
-  const wiringWarnings = checkGitWiring(root.value);
+  const wiringWarnings = checkGitWiring(outputRoot);
 
-  // The engine's own output directory is never part of the reviewed change
-  // set (a written artifact must not change the next run's identity).
-  const candidates = changed.value.filter((f) => !f.startsWith("_agentic-guardrails/"));
+  // Exit-NEUTRAL declarations from the scope plane: a guessed diff base and
+  // absent `gh` metadata describe this run's FRAMING, not lost analysis
+  // coverage — "gh is never a gate", so neither may drive exit 2.
+  const scopeDeclared: Degradation[] = [...scope.degradations];
+  let prMetadata: PrMetadata | undefined;
+  // The `gh` OUTCOME is part of this run's identity (see computeRunId): the
+  // metadata lands in the artifact but is not derived from the reviewed
+  // content, so without it the same PR ref with and without `gh` — or after a
+  // PR title edit on GitHub — would produce the same runId and OVERWRITE the
+  // artifact with different bytes. Undefined for every non-PR scope, which
+  // keeps their runIds exactly as they were.
+  let ghIdentity: unknown;
+  if (scope.prId !== undefined) {
+    const metadata = ghPrMetadata(outputRoot, scope.prId, options.gh);
+    if (metadata.ok) prMetadata = metadata.metadata;
+    else scopeDeclared.push(metadata.degradation);
+    ghIdentity = metadata.ok ? metadata.metadata : { unavailable: metadata.degradation.reason };
+  }
+
+  // A worktree is created ONLY when the reviewed ref is not the current HEAD.
+  // Checking out a ref that already IS HEAD would silently drop the user's
+  // uncommitted state: "isolated execution" means isolated from a ref
+  // checkout, not isolation for its own sake.
+  const worktreeRef =
+    scope.ref !== undefined && !isCurrentHead(outputRoot, scope.ref) ? scope.ref : undefined;
+
+  // IN-PLACE DIVERGENCE (declared, never silent). A ref scope analyzed in
+  // place — `--branch <current>`, `--project` — takes its CHANGE SET from
+  // commits but reads CONTENT from the user's working tree, which is the
+  // right call (reviewing HEAD inside a worktree would silently drop their
+  // uncommitted state) but means the analyzed bytes are not the ref the
+  // manifest records. An uncommitted edit can add a finding the ref does not
+  // have, and a reverted one can move a file into `deletedFiles`. Both are
+  // legitimate; being unable to tell from the artifact is not.
+  if (scope.kind !== "uncommitted" && worktreeRef === undefined) {
+    const dirty = changeSetFor(
+      { kind: "uncommitted", slug: "uncommitted", degradations: [] },
+      outputRoot,
+    );
+    if (dirty.ok && dirty.value.files.length > 0) {
+      const shown = dirty.value.files.slice(0, 3).join(", ");
+      const more = dirty.value.files.length > 3 ? ", …" : "";
+      scopeDeclared.push({
+        reason:
+          `analyzed IN PLACE with ${dirty.value.files.length} uncommitted change(s) in the working tree ` +
+          `(${shown}${more}) — the content analyzed is not exactly ${scope.ref ?? "HEAD"}`,
+        subject: "scope-in-place",
+      });
+    }
+  }
+
+  const analyzeIn = (analyzeRoot: string): Promise<AnalysisOutcome> =>
+    analyze({ analyzeRoot, outputRoot, scope, loaded, options, ghIdentity });
+
+  let outcome: AnalysisOutcome;
+  const worktreeDegraded: Degradation[] = [];
+  try {
+    if (worktreeRef === undefined) {
+      outcome = await analyzeIn(outputRoot);
+    } else {
+      // 1.14's lifecycle, consumed as-is: reclaim-before-create, `--detach`,
+      // `core.longpaths`, removal in `finally`. No second lifecycle here.
+      const lifecycle = await withWorktree(
+        {
+          repoRoot: outputRoot,
+          ref: worktreeRef,
+          ...(options.worktreeBaseDir === undefined ? {} : { baseDir: options.worktreeBaseDir }),
+        },
+        analyzeIn,
+      );
+      if (!lifecycle.ok) {
+        // Name the residue path: a user cannot clean up a leak they cannot name.
+        const residue =
+          lifecycle.worktreePath === undefined ? "" : ` (worktree ${lifecycle.worktreePath})`;
+        // The lifecycle's OWN degradations (base degraded, reclaim failed,
+        // unowned or in-use residue declared) are the only record of them on
+        // this path: a typed preflight failure has no degradation channel, so
+        // keeping just `.reason` would DROP declarations the throwing path
+        // correctly harvests.
+        const declared = lifecycle.degradations
+          .map(toManifestDegradation)
+          .map((d) => `${d.reason} (${d.subject})`)
+          .join("; ");
+        const suffix = declared === "" ? "" : ` — worktree degradations: ${declared}`;
+        return {
+          ok: false,
+          code: "preflight",
+          message: `worktree for ${worktreeRef}: ${lifecycle.reason}${residue}${suffix}`,
+        };
+      }
+      outcome = lifecycle.value;
+      // Worktree degradations reach the manifest through the 1.14 adapter —
+      // never a hand-rolled shape at a schema boundary.
+      worktreeDegraded.push(...lifecycle.degradations.map(toManifestDegradation));
+    }
+  } catch (error) {
+    // On the THROWING path there is no lifecycle result: a removal that failed
+    // while the callback was also failing rides on the propagating error, and
+    // dropping it here would make the leak invisible (SPIKE-5 item 13).
+    const residue = worktreeDegradationsOf(error)
+      .map(toManifestDegradation)
+      .map((d) => `${d.reason} (${d.subject})`)
+      .join("; ");
+    const suffix = residue === "" ? "" : ` — worktree residue: ${residue}`;
+    // A change set git cannot produce stays a TYPED preflight failure, exactly
+    // as it was before scopes existed; anything else is a real bug and keeps
+    // propagating.
+    if (error instanceof ChangeSetError) {
+      return { ok: false, code: "preflight", message: `${error.message}${suffix}` };
+    }
+    if (suffix === "") throw error;
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`${message}${suffix}`, { cause: error });
+  }
+
+  // ---- Phase 5: composition (INVOKING repo, outside any worktree) ---------
+  const runDegraded = [...outcome.runDegraded, ...worktreeDegraded];
+  const declaredOnly = [...outcome.declaredOnly, ...scopeDeclared];
+  const bySubjectReason = (a: Degradation, b: Degradation): number =>
+    compare(a.subject, b.subject) || compare(a.reason, b.reason);
+  runDegraded.sort(bySubjectReason);
+  // Sorted like every sibling list: analyzer map insertion order must never
+  // reach the artifact's bytes.
+  declaredOnly.sort(bySubjectReason);
+
+  // Config-plane visibility: warnings (never degradations, never exit 2).
+  const knownAxioms = new Set([...outcome.registeredAxioms, ...ANALYZERLESS_KNOWN_AXIOMS]);
+  const configWarnings = [
+    ...loaded.warnings,
+    ...Object.keys(config.axioms)
+      .filter((id) => !knownAxioms.has(id))
+      .sort(numericCompare)
+      .map((id) => `axioms.${id} matches no known axiom`),
+  ];
+
+  // Governing-config git status: an uncommitted config gating the run is
+  // declared in the manifest and warned about at the CLI (P3 — visibility
+  // only, no policy). Absent = no file, so no git call needed.
+  let configGitStatus: RunManifest["configGitStatus"];
+  if (loaded.configPresent) {
+    const status = fileGitStatus(outputRoot, "_agentic-guardrails/config.yaml");
+    // ponytail: a git failure here is near-impossible (repoRoot + status just
+    // succeeded); the field is optional, so it is simply omitted on failure.
+    if (status.ok) configGitStatus = status.value;
+  } else {
+    configGitStatus = "absent";
+  }
+
+  // The effective post-default enforcement map the gate uses — persisted in
+  // the manifest so the governing policy is durable, keys numeric-sorted.
+  const enforcement = Object.fromEntries(
+    Object.keys(config.axioms)
+      .sort(numericCompare)
+      .map((id) => {
+        const entry = config.axioms[id]!;
+        return [
+          id,
+          {
+            enforcement: entry.enforcement,
+            ...(entry.maxFindings === undefined ? {} : { maxFindings: entry.maxFindings }),
+          },
+        ];
+      }),
+  );
+
+  const gate = evaluateGate(outcome.findings, config, outcome.enabledAxioms);
+
+  // Declared assembly: six phases always, membership derived from
+  // scope/mode/config (off-axioms shrink phase 1), empty phases say why.
+  const phases: RunManifest["phases"] = [
+    { phase: 0, members: ["preflight"], ran: true },
+    {
+      phase: 1,
+      members: outcome.phase1.members,
+      ran: outcome.phase1.ran,
+      ...(outcome.phase1.reason === undefined ? {} : { reason: outcome.phase1.reason }),
+    },
+    { phase: 2, members: [], ran: false, reason: "SDD gate — empty membership until Epic 2" },
+    { phase: 3, members: [], ran: false, reason: "LLM enrichment — empty membership until Epic 3" },
+    { phase: 4, members: ["merge", "sort"], ran: true },
+    { phase: 5, members: ["compose"], ran: true },
+  ];
+
+  const { manifest, degraded: sentinelDegraded } = buildRunManifest({
+    axiomsOff: outcome.axiomsOff,
+    ...(outcome.ledgerHash === undefined ? {} : { ledgerHash: outcome.ledgerHash }),
+    ...(outcome.corpusHash === undefined ? {} : { corpusHash: outcome.corpusHash }),
+    // The corpus axiom 6 actually judged against — reproducibility, and the
+    // explicit distinction from `corpusHash` (committed corpus-map.yaml).
+    ...(outcome.corpusSeedHash === undefined ? {} : { corpusSeedHash: outcome.corpusSeedHash }),
+    configHash: loaded.configHash,
+    configPresent: loaded.configPresent,
+    enforcement,
+    configGitStatus,
+    phases,
+    cache: outcome.cache,
+    // The slug is a directory name; the manifest carries what was ACTUALLY
+    // reviewed. Omitted for the uncommitted scope, which keeps pre-1.15
+    // artifact bytes byte-for-byte unchanged.
+    ...(scope.kind === "uncommitted"
+      ? {}
+      : {
+          scope: {
+            kind: scope.kind,
+            ...(scope.ref === undefined ? {} : { ref: scope.ref }),
+            ...(scope.base === undefined ? {} : { base: scope.base }),
+            ...(scope.baseGuessed === true ? { baseGuessed: true } : {}),
+          },
+        }),
+    ...(prMetadata === undefined ? {} : { pr: prMetadata }),
+  });
+  const artifact: ReviewArtifact = {
+    schemaVersion: 1,
+    runId: outcome.runId,
+    scope: scope.slug,
+    changedFiles: outcome.changedFiles,
+    deletedFiles: outcome.deletedFiles,
+    findings: outcome.findings,
+    degraded: [...sentinelDegraded, ...declaredOnly, ...runDegraded],
+    manifest,
+    gate,
+  };
+  // Never persist an invalid envelope: validation failure is the exit-2 path.
+  const parsed = reviewArtifactSchema.safeParse(artifact);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    return {
+      ok: false,
+      code: "invalid-artifact",
+      message: `composed review artifact failed schema validation: ${issue?.path.join(".") ?? "?"}: ${issue?.message ?? "unknown issue"}`,
+    };
+  }
+  return {
+    ok: true,
+    repoRoot: outputRoot,
+    artifact,
+    artifactJson: `${JSON.stringify(artifact, null, 2)}\n`,
+    runDegraded,
+    declaredOnly,
+    degradedRun: runDegraded.length > 0,
+    gate,
+    configPresent: loaded.configPresent,
+    deviations: loaded.deviations,
+    configWarnings,
+    wiringWarnings,
+  };
+}
+
+/** True when `ref` resolves to the commit HEAD is on — the test that decides
+ * whether a worktree is needed at all. An unresolvable ref answers "not HEAD"
+ * and is caught by the lifecycle's own ref handling. */
+function isCurrentHead(repoRoot: string, ref: string): boolean {
+  const target = revParse(repoRoot, ref);
+  return target.ok && target.value === headSha(repoRoot);
+}
+
+/**
+ * One analysis pass over `analyzeRoot` — phases 0 (change set) through 4
+ * (aggregation). Runs INSIDE the worktree when there is one; every path it
+ * emits is relative to `analyzeRoot`.
+ */
+async function analyze(inputs: AnalysisInputs): Promise<AnalysisOutcome> {
+  const { analyzeRoot, outputRoot, scope, options } = inputs;
+  const config = inputs.loaded.config;
+
+  // The `_agentic-guardrails/` exclusion lives inside the resolver, once, for
+  // all four producers (a written artifact must not change the next run's
+  // identity).
+  const changed = changeSetFor(scope, analyzeRoot);
+  if (!changed.ok) throw new ChangeSetError(changed.reason);
+  const candidates = changed.value;
 
   // Content hashes are computed ONCE, here, before any analyzer runs — the
-  // same snapshot feeds analysis and the runId (no analyze/hash race). A
-  // candidate absent from disk is a deleted uncommitted file: excluded from
-  // analysis, carried on the artifact, never a degradation (deletion is not
-  // coverage loss).
+  // same snapshot feeds analysis and the runId (no analyze/hash race).
+  //
+  // An unreadable candidate is NOT automatically a deletion. For a ref scope
+  // git already told us which paths are deleted (`--name-status`), so a read
+  // failure on any OTHER path is lost coverage and is DECLARED — silently
+  // filing it as "deleted" is a permission-denied/locked file reading as a
+  // clean review. For the working-tree scopes an absent path IS a deletion
+  // (excluded from analysis, carried on the artifact, never a degradation —
+  // deletion is not coverage loss).
   const changedFiles: string[] = [];
-  const deletedFiles: string[] = [];
+  const deletedFiles: string[] = [...candidates.deleted];
+  const unreadable: Degradation[] = [];
   const fileHashes: [string, string][] = [];
-  for (const file of candidates) {
+  for (const file of candidates.files) {
     let contentHash: string;
     try {
+      // `fsPath`: a worktree base plus a deep repo-relative path can cross
+      // Win32's 260-char limit, and an fs failure here is indistinguishable
+      // from a deleted file — the file would silently leave the analysis.
       contentHash = createHash("sha256")
-        .update(readFileSync(path.join(root.value, file)))
+        .update(readFileSync(fsPath(path.join(analyzeRoot, file))))
         .digest("hex");
-    } catch {
-      deletedFiles.push(file);
+    } catch (error) {
+      if (candidates.fromRefs) {
+        const message = error instanceof Error ? error.message : String(error);
+        unreadable.push({
+          reason: `changed at the reviewed ref but unreadable: ${firstLine(message)}`,
+          subject: file,
+        });
+      } else {
+        deletedFiles.push(file);
+      }
       continue;
     }
     changedFiles.push(file);
     fileHashes.push([file, contentHash]);
   }
+  deletedFiles.sort();
 
   const analyzableFiles = changedFiles.filter(isAnalyzableTs);
   const discovery =
     analyzableFiles.length > 0
-      ? discoverTsconfigs(root.value)
+      ? discoverTsconfigs(analyzeRoot)
       : { tsconfigPaths: [], degraded: [] };
   // ---- Cache plane (1.7) --------------------------------------------------
   // Cache keys are per-UNIT content addresses, deliberately narrower than
@@ -314,7 +696,9 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewRunRes
   // never a quiet fallback, never an unauthenticated read.
   const cacheStats = { hits: 0, misses: 0, invalid: 0 };
   const cacheDegraded: Degradation[] = [];
-  const cacheRoot = path.join(root.value, "_agentic-guardrails", ".cache");
+  // outputRoot, not analyzeRoot: the cache belongs to the invoking repo and
+  // must survive the worktree it was populated from (which is deleted).
+  const cacheRoot = path.join(outputRoot, "_agentic-guardrails", ".cache");
   const secret = loadCacheSecret(options.cacheSecretPath);
   let cacheDisabled: string | undefined;
   if (secret === undefined) {
@@ -337,9 +721,9 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewRunRes
   const graphKeys = new Map<string, string>();
   if (cacheDisabled === undefined) {
     for (const tsconfigPath of discovery.tsconfigPaths) {
-      const key = computeGraphKey(root.value, tsconfigPath);
+      const key = computeGraphKey(analyzeRoot, tsconfigPath);
       if (key === undefined) {
-        cacheDisabled = `cache key not computable for ${path.relative(root.value, tsconfigPath).replaceAll("\\", "/")} (unresolvable or unreadable inputs)`;
+        cacheDisabled = `cache key not computable for ${path.relative(analyzeRoot, tsconfigPath).replaceAll("\\", "/")} (unresolvable or unreadable inputs)`;
         graphKeys.clear();
         break;
       }
@@ -382,7 +766,7 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewRunRes
           cacheStats.invalid += 1;
           cacheDegraded.push({
             reason: "invalid cache entry (recomputed and overwritten)",
-            subject: `cache/graph/${path.relative(root.value, tsconfigPath).replaceAll("\\", "/")}`,
+            subject: `cache/graph/${path.relative(analyzeRoot, tsconfigPath).replaceAll("\\", "/")}`,
           });
         } else {
           cacheStats.misses += 1;
@@ -427,7 +811,9 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewRunRes
   // the no-corpus state is itself an input worth keying on. The bytes are
   // read ONCE and handed to the analyzer through the context, so the hashed
   // corpus and the analyzed corpus are the same buffer.
-  const corpusSeed = readStructuralSeedFile(root.value);
+  // The corpus seed is the invoking repo's knowledge, not the reviewed ref's
+  // — a worktree at an old commit must still be judged against today's corpus.
+  const corpusSeed = readStructuralSeedFile(outputRoot);
   const seedHash = corpusSeed.ok
     ? createHash("sha256").update(corpusSeed.bytes).digest("hex")
     : "absent";
@@ -444,7 +830,10 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewRunRes
           axiom === "5" ? fileHashes : analyzableHashes,
           axiom === "6" ? seedHash : null,
           [...graphKeys.values()].sort(),
-          "uncommitted",
+          // The scope, threaded from the resolver — no literal survives here.
+          // A `project` run and an `uncommitted` run over the same file set
+          // are different analyses and must not share cache entries.
+          scope.slug,
           config.boundaries ?? null,
           RULESET_VERSION,
           ENGINE_VERSION,
@@ -469,7 +858,7 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewRunRes
   };
 
   const context: AnalyzerContext = {
-    repoRoot: root.value,
+    repoRoot: analyzeRoot,
     changedFiles: analyzableFiles,
     allChangedFiles: changedFiles,
     tsconfigPaths: discovery.tsconfigPaths,
@@ -571,14 +960,19 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewRunRes
   // Everything below runs synchronously to the return — an abandoned
   // in-flight analyzer cannot mutate `settled` mid-aggregation.
   const findings: Finding[] = [];
-  const runDegraded: Degradation[] = [...discovery.degraded];
+  // Unreadable-at-the-ref entries are REAL degradations: coverage this run
+  // claimed and did not get.
+  const runDegraded: Degradation[] = [...discovery.degraded, ...unreadable];
   const analyzerDegraded: [axiom: string, degradation: Degradation][] = [];
   // The "absent until init" carve-out (1.8, generalized in 1.13): an analyzer
   // DECLARES which of its degradations are exit-neutral. The pipeline never
   // string-matches reasons — a forged or drifting message can no longer buy
   // an exemption, and every real degradation (unreadable/invalid/empty inputs
   // included) drives exit 2 exactly as before.
-  const declaredOnly: Degradation[] = [];
+  // Declarations ABOUT the change set (an empty ref diff) ride the same
+  // exit-neutral channel: nothing was lost, but "nothing was reviewed" must
+  // never look like "nothing was wrong".
+  const declaredOnly: Degradation[] = [...candidates.degradations];
   for (const analyzer of analyzers) {
     const result = settled.get(analyzer.axiom);
     if (result === undefined) {
@@ -620,14 +1014,16 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewRunRes
   // (excluded from runDegraded — see ReviewRunResult.runDegraded); a
   // present-but-unreadable or present-but-invalid file is a REAL
   // degradation counted toward the exit-2 logic.
+  // outputRoot: the committed knowledge files are the invoking repo's, and a
+  // reviewed ref predating `init` must not read as "ledger absent".
   const ledger = hashKnowledgeFile(
-    root.value,
+    outputRoot,
     "_agentic-guardrails/conventions.yaml",
     conventionsFileSchema,
     "ledger",
   );
   const corpus = hashKnowledgeFile(
-    root.value,
+    outputRoot,
     "_agentic-guardrails/corpus-map.yaml",
     corpusMapFileSchema,
     "corpus",
@@ -638,66 +1034,34 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewRunRes
   // ---- Phase 4: aggregation (FR-21 merge, then deterministic sort) --------
   const merged = mergeFindings(findings);
   merged.sort(byFileLineAxiom);
-  const bySubjectReason = (a: Degradation, b: Degradation): number =>
-    compare(a.subject, b.subject) || compare(a.reason, b.reason);
-  runDegraded.sort(bySubjectReason);
-  // Sorted like every sibling list: analyzer map insertion order must never
-  // reach the artifact's bytes.
-  declaredOnly.sort(bySubjectReason);
 
-  // ---- Phase 5: composition -----------------------------------------------
-  // Config-plane visibility: warnings (never degradations, never exit 2).
-  const knownAxioms = new Set([...registered.map((a) => a.axiom), ...ANALYZERLESS_KNOWN_AXIOMS]);
-  const configWarnings = [
-    ...loaded.warnings,
-    ...Object.keys(config.axioms)
-      .filter((id) => !knownAxioms.has(id))
-      .sort(numericCompare)
-      .map((id) => `axioms.${id} matches no known axiom`),
-  ];
-
-  // Governing-config git status: an uncommitted config gating the run is
-  // declared in the manifest and warned about at the CLI (P3 — visibility
-  // only, no policy). Absent = no file, so no git call needed.
-  let configGitStatus: RunManifest["configGitStatus"];
-  if (loaded.configPresent) {
-    const status = fileGitStatus(root.value, "_agentic-guardrails/config.yaml");
-    // ponytail: a git failure here is near-impossible (repoRoot + status just
-    // succeeded); the field is optional, so it is simply omitted on failure.
-    if (status.ok) configGitStatus = status.value;
-  } else {
-    configGitStatus = "absent";
-  }
-
-  // The effective post-default enforcement map the gate uses — persisted in
-  // the manifest so the governing policy is durable, keys numeric-sorted.
-  const enforcement = Object.fromEntries(
-    Object.keys(config.axioms)
-      .sort(numericCompare)
-      .map((id) => {
-        const entry = config.axioms[id]!;
-        return [
-          id,
-          {
-            enforcement: entry.enforcement,
-            ...(entry.maxFindings === undefined ? {} : { maxFindings: entry.maxFindings }),
-          },
-        ];
-      }),
-  );
-
-  const gate = evaluateGate(
-    merged,
-    config,
-    analyzers.map((a) => a.axiom),
-  );
-
-  // Declared assembly: six phases always, membership derived from
-  // scope/mode/config (off-axioms shrink phase 1), empty phases say why.
-  const phases: RunManifest["phases"] = [
-    { phase: 0, members: ["preflight"], ran: true },
-    {
-      phase: 1,
+  // Composition deliberately does NOT happen here: it is the caller's job,
+  // outside any worktree, so degradations only known after removal still land
+  // in the artifact.
+  return {
+    changedFiles,
+    deletedFiles,
+    findings: merged,
+    runDegraded,
+    declaredOnly,
+    // Snapshot COPY, never the live counter object — nothing may mutate the
+    // manifest's cache truth after composition.
+    cache: {
+      ...cacheStats,
+      ...(cacheDisabled === undefined ? {} : { disabled: cacheDisabled }),
+    },
+    ...(corpusSeed.ok ? { corpusSeedHash: seedHash } : {}),
+    ...(ledger.hash === undefined ? {} : { ledgerHash: ledger.hash }),
+    ...(corpus.hash === undefined ? {} : { corpusHash: corpus.hash }),
+    runId: computeRunId(
+      analyzeRoot,
+      scope.slug,
+      fileHashes,
+      deletedFiles,
+      inputs.loaded.configHash,
+      inputs.ghIdentity,
+    ),
+    phase1: {
       members: analyzers.map((a) => `axiom-${a.axiom}`).sort(numericCompare),
       // `ran` reflects reality: false when nothing was enabled OR the budget
       // abort cut the phase off before ANY analyzer completed; a mid-flight
@@ -711,65 +1075,9 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewRunRes
             }
           : {}),
     },
-    { phase: 2, members: [], ran: false, reason: "SDD gate — empty membership until Epic 2" },
-    { phase: 3, members: [], ran: false, reason: "LLM enrichment — empty membership until Epic 3" },
-    { phase: 4, members: ["merge", "sort"], ran: true },
-    { phase: 5, members: ["compose"], ran: true },
-  ];
-
-  const { manifest, degraded: sentinelDegraded } = buildRunManifest({
+    enabledAxioms: analyzers.map((a) => a.axiom),
     axiomsOff,
-    ...(ledger.hash === undefined ? {} : { ledgerHash: ledger.hash }),
-    ...(corpus.hash === undefined ? {} : { corpusHash: corpus.hash }),
-    // The corpus axiom 6 actually judged against — reproducibility, and the
-    // explicit distinction from `corpusHash` (committed corpus-map.yaml).
-    ...(corpusSeed.ok ? { corpusSeedHash: seedHash } : {}),
-    configHash: loaded.configHash,
-    configPresent: loaded.configPresent,
-    enforcement,
-    configGitStatus,
-    phases,
-    // Snapshot COPY, never the live counter object — nothing may mutate the
-    // manifest's cache truth after composition.
-    cache: {
-      ...cacheStats,
-      ...(cacheDisabled === undefined ? {} : { disabled: cacheDisabled }),
-    },
-  });
-  const artifact: ReviewArtifact = {
-    schemaVersion: 1,
-    runId: computeRunId(root.value, fileHashes, deletedFiles, loaded.configHash),
-    scope: "uncommitted",
-    changedFiles,
-    deletedFiles,
-    findings: merged,
-    degraded: [...sentinelDegraded, ...declaredOnly, ...runDegraded],
-    manifest,
-    gate,
-  };
-  // Never persist an invalid envelope: validation failure is the exit-2 path.
-  const parsed = reviewArtifactSchema.safeParse(artifact);
-  if (!parsed.success) {
-    const issue = parsed.error.issues[0];
-    return {
-      ok: false,
-      code: "invalid-artifact",
-      message: `composed review artifact failed schema validation: ${issue?.path.join(".") ?? "?"}: ${issue?.message ?? "unknown issue"}`,
-    };
-  }
-  return {
-    ok: true,
-    repoRoot: root.value,
-    artifact,
-    artifactJson: `${JSON.stringify(artifact, null, 2)}\n`,
-    runDegraded,
-    declaredOnly,
-    degradedRun: runDegraded.length > 0,
-    gate,
-    configPresent: loaded.configPresent,
-    deviations: loaded.deviations,
-    configWarnings,
-    wiringWarnings,
+    registeredAxioms: registered.map((a) => a.axiom),
   };
 }
 
@@ -852,7 +1160,10 @@ export interface TsconfigDiscovery {
  */
 export function discoverTsconfigs(root: string): TsconfigDiscovery {
   const rootTsconfig = path.join(root, "tsconfig.json");
-  if (!existsSync(rootTsconfig)) {
+  // `fsPath` everywhere `fs` is asked about an ANALYZE-root path: past
+  // Win32's 260-char limit `existsSync` answers "false", so a long path would
+  // silently read as "no tsconfig here" (SPIKE-5 item 11).
+  if (!existsSync(fsPath(rootTsconfig))) {
     return {
       tsconfigPaths: [],
       degraded: [{ reason: "root tsconfig.json not found", subject: "tsconfig.json" }],
@@ -891,7 +1202,7 @@ export function discoverTsconfigs(root: string): TsconfigDiscovery {
     let refPath = path.resolve(root, reference.path);
     // A reference may point at a directory (tsconfig.json implied) or a file.
     if (!refPath.endsWith(".json")) refPath = path.join(refPath, "tsconfig.json");
-    if (existsSync(refPath)) {
+    if (existsSync(fsPath(refPath))) {
       tsconfigPaths.push(refPath);
     } else {
       degraded.push({
@@ -904,38 +1215,53 @@ export function discoverTsconfigs(root: string): TsconfigDiscovery {
 }
 
 /**
- * Run identity = sha256 over (scope, HEAD sha — empty-tree sentinel before
+ * Run identity = sha256 over (scope slug, HEAD sha of the ANALYZE root —
+ * the reviewed ref's commit for a worktree scope, empty-tree sentinel before
  * the first commit — sorted changed paths + their content hashes as snapped
  * before phase 1, deleted uncommitted paths, root tsconfig content hash,
  * config.yaml content hash — literal "absent" sentinel when absent — ruleset
- * version, engine version), truncated to 16 hex chars. No wall clock —
- * identical input re-runs overwrite the same artifact file.
+ * version, engine version, and — only when there is one — the `gh` metadata
+ * outcome), truncated to 16 hex chars. No wall clock — identical input re-runs
+ * overwrite the same artifact file.
+ *
+ * The `gh` term is APPENDED and omitted when absent, so every non-PR scope
+ * hashes exactly the tuple it hashed before it existed (bare
+ * `guardrails review` keeps its artifact bytes). Where it IS present it is
+ * load-bearing: `manifest.pr` and the `gh-pr-metadata` degradation are
+ * artifact content that no other identity input covers, so without it the same
+ * PR ref would overwrite one runId's artifact with different bytes.
  */
 function computeRunId(
-  root: string,
+  analyzeRoot: string,
+  scopeSlug: string,
   fileHashes: readonly (readonly [string, string])[],
   deletedFiles: readonly string[],
   configHash: string,
+  ghIdentity?: unknown,
 ): string {
   let tsconfigHash: string;
   try {
     tsconfigHash = createHash("sha256")
-      .update(readFileSync(path.join(root, "tsconfig.json")))
+      .update(readFileSync(fsPath(path.join(analyzeRoot, "tsconfig.json"))))
       .digest("hex");
   } catch {
     tsconfigHash = "absent";
   }
+  // Everything hashed is CONTENT or a ref-derived name — never an absolute
+  // path. `analyzeRoot` is a temp worktree for a ref scope, so a path here
+  // would make the same ref produce a different runId on every run.
   return createHash("sha256")
     .update(
       JSON.stringify([
-        "uncommitted",
-        headSha(root),
+        scopeSlug,
+        headSha(analyzeRoot),
         fileHashes,
         deletedFiles,
         tsconfigHash,
         configHash,
         RULESET_VERSION,
         ENGINE_VERSION,
+        ...(ghIdentity === undefined ? [] : [ghIdentity]),
       ]),
     )
     .digest("hex")
@@ -969,11 +1295,16 @@ export function computeGraphKey(
       { ...ts.sys, onUnRecoverableConfigFileDiagnostic: () => undefined },
     );
     if (parsed === undefined) return undefined;
-    const tsconfigHash = createHash("sha256").update(readFileSync(tsconfigPath)).digest("hex");
+    // `fsPath`: these are ANALYZE-root paths, and a >260-char one on Windows
+    // would throw here — disabling the cache for the WHOLE run under a
+    // generic "unreadable inputs" reason (SPIKE-5 item 11).
+    const tsconfigHash = createHash("sha256")
+      .update(readFileSync(fsPath(tsconfigPath)))
+      .digest("hex");
     const files = [...parsed.fileNames].sort().map((file) => {
       // An unreadable participant makes the key undefined — a declared
       // disable, never an "unreadable" sentinel masquerading as content.
-      const hash = createHash("sha256").update(readFileSync(file)).digest("hex");
+      const hash = createHash("sha256").update(readFileSync(fsPath(file))).digest("hex");
       return [path.relative(root, file).replaceAll("\\", "/"), hash];
     });
     return createHash("sha256")

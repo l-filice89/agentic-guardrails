@@ -18,7 +18,9 @@ import { runInit, type InitIo } from "@agentic-guardrails/core";
  * unit-testable without a real TTY. */
 export interface QuestionSource {
   question(prompt: string): Promise<string>;
-  once(event: "close", listener: () => void): unknown;
+  /** `"SIGINT"` is used by the 1.15 disposition prompt: Ctrl-C there must
+   * settle through the EOF default instead of readline's own exit(130). */
+  once(event: "close" | "SIGINT", listener: () => void): unknown;
 }
 
 /**

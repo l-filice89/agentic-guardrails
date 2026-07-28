@@ -57,6 +57,13 @@ export interface BuildRunManifestOptions {
   phases?: RunManifest["phases"];
   /** Content-addressed-cache lookup counters (1.7). */
   cache?: RunManifest["cache"];
+  /** What was reviewed (1.15): kind + the ref VERBATIM + the diff base. Passed
+   * only for the ref-bearing kinds — omitting it for the default uncommitted
+   * scope keeps pre-1.15 artifact bytes unchanged. */
+  scope?: RunManifest["scope"];
+  /** `gh`-sourced PR metadata (1.15); omitted whenever `gh` could not supply
+   * it (declared as a degradation instead — never a gate). */
+  pr?: RunManifest["pr"];
   /** sha256 hex of committed conventions.yaml bytes (1.8); omitted → the
    * absent-file sentinel plus its degraded entry. */
   ledgerHash?: string;
@@ -94,6 +101,8 @@ export function buildRunManifest(options: BuildRunManifestOptions = {}): BuiltMa
     ...(axiomsOff.length > 0 ? { axiomsOff: [...axiomsOff].sort(numericCompare) } : {}),
     ...(options.phases === undefined ? {} : { phases: options.phases }),
     ...(options.cache === undefined ? {} : { cache: options.cache }),
+    ...(options.scope === undefined ? {} : { scope: options.scope }),
+    ...(options.pr === undefined ? {} : { pr: options.pr }),
   };
   // A real hash drops the matching degradation; an absent file keeps the
   // sentinel + declaration exactly as before init existed.

@@ -14,6 +14,7 @@ export * from "./finding-id.js";
 export * from "./ledger.js";
 export * from "./migration.js";
 export * from "./partial-result.js";
+export * from "./pr-metadata.js";
 export * from "./review-artifact.js";
 export * from "./run-manifest.js";
 export * from "./structural-seed.js";

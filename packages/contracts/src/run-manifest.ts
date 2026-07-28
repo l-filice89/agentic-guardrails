@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { enforcementSchema } from "./config.js";
+import { prMetadataSchema } from "./pr-metadata.js";
 
 /**
  * RunManifest — the zero-silent-degradation carrier. Every run records
@@ -92,6 +93,27 @@ export const runManifestSchema = z
         disabled: z.string().min(1).optional(),
       })
       .optional(),
+    /** What was reviewed (1.15). `artifact.scope` is only a DIRECTORY name —
+     * lossy by construction (slugged, hash-suffixed) — so the exact ref and
+     * base are recorded here instead: the record of what was reviewed is
+     * never the directory it was filed under. Optional so pre-1.15 artifacts
+     * still parse; absent means the uncommitted working tree. */
+    scope: z
+      .strictObject({
+        kind: z.enum(["uncommitted", "branch", "pr", "project"]),
+        /** The reviewed ref, VERBATIM (absent for `uncommitted`). */
+        ref: z.string().min(1).optional(),
+        /** Diff base for `branch`/`pr`; absent for the non-diff kinds. */
+        base: z.string().min(1).optional(),
+        /** true → the base was not supplied and was resolved by the declared
+         * fallback order; the run also carries a degradation naming it. */
+        baseGuessed: z.boolean().optional(),
+      })
+      .optional(),
+    /** `gh`-sourced PR metadata (1.15). Optional and degrading: absent means
+     * `gh` was missing, unauthenticated, erroring or unparseable — declared
+     * as a degradation, never a gate. */
+    pr: prMetadataSchema.optional(),
     modelIdentity: z
       .strictObject({
         model: z.string().min(1),

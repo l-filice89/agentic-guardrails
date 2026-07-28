@@ -2,7 +2,12 @@ import { computeFindingId, type Finding } from "@agentic-guardrails/contracts";
 import { DEFAULT_ANALYZERS, type ReviewArtifact } from "@agentic-guardrails/core";
 import { describe, expect, it } from "vitest";
 
-import { AXIOM_CATEGORY, formatSummary } from "./review-command.js";
+import {
+  AXIOM_CATEGORY,
+  degradationText,
+  formatSummary,
+  scopeFromOptions,
+} from "./review-command.js";
 
 const MANIFEST = {
   schemaVersion: 1,
@@ -120,10 +125,56 @@ describe("formatSummary", () => {
   });
 });
 
+describe("degradation text sanitizing", () => {
+  it("strips control characters from degradation reasons AND subjects", () => {
+    // Degradation reasons embed subprocess stderr verbatim (`gh`, git), so a
+    // hostile `gh` on PATH could otherwise write ANSI escapes to the terminal
+    // — the same exposure finding messages were already sanitized against.
+    const ESC = String.fromCharCode(0x1b);
+    const BEL = String.fromCharCode(0x07);
+    const hostile = {
+      reason: `PR metadata unavailable: ${ESC}[2J${BEL}gh said so`,
+      subject: `gh${ESC}[31m-pr-metadata`,
+    };
+
+    const line = degradationText(hostile);
+    expect(line).toBe("PR metadata unavailable: [2Jgh said so (gh[31m-pr-metadata)");
+    expect(line).not.toContain(ESC);
+    expect(line).not.toContain(BEL);
+
+    // The report HEADER carries the same text and must be sanitized too.
+    const out = formatSummary(artifact([]), "artifact.json", [hostile]);
+    expect(out).not.toContain(ESC);
+    expect(out).not.toContain(BEL);
+  });
+});
+
 describe("AXIOM_CATEGORY coupling", () => {
   it("every registered analyzer axiom has an explicit label (never 'uncategorized')", () => {
     for (const analyzer of DEFAULT_ANALYZERS) {
       expect(AXIOM_CATEGORY[analyzer.axiom]).toBeDefined();
     }
+  });
+});
+
+describe("scopeFromOptions", () => {
+  it("defaults to the uncommitted scope with no flags", () => {
+    expect(scopeFromOptions({})).toEqual({ ok: true, scope: { kind: "uncommitted" } });
+  });
+
+  it("maps each scope flag, with a valueless --branch meaning the checked-out branch", () => {
+    expect(scopeFromOptions({ branch: "feat/x", base: "main" })).toEqual({
+      ok: true,
+      scope: { kind: "branch", ref: "feat/x", base: "main" },
+    });
+    expect(scopeFromOptions({ branch: true })).toEqual({ ok: true, scope: { kind: "branch" } });
+    expect(scopeFromOptions({ pr: "42" })).toEqual({ ok: true, scope: { kind: "pr", ref: "42" } });
+    expect(scopeFromOptions({ project: true })).toEqual({ ok: true, scope: { kind: "project" } });
+  });
+
+  it("rejects --base without a diffing scope rather than ignoring it silently", () => {
+    const result = scopeFromOptions({ base: "main" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.message).toContain("--base applies to");
   });
 });

@@ -17,6 +17,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ImportGraphBuildResult } from "../adapter/language-adapter.js";
 import { axiom6Conformance, NO_CORPUS_PREFIX } from "../analyzers/axiom6-conformance.js";
+import { worktreeBaseDir } from "../git/worktree.js";
 import { ImportGraph } from "../graph/import-graph.js";
 import { STRUCTURAL_SEED_PATH } from "../knowledge/structural-seed.js";
 import { ENGINE_VERSION } from "./manifest.js";
@@ -1052,4 +1053,379 @@ describe("runReview manifest truth + wiring preflight (1.8)", () => {
       expect(result.degradedRun).toBe(false);
     });
   }
+});
+
+// ---------------------------------------------------------------------------
+// Review scopes (1.15) — the analyze/write split
+// ---------------------------------------------------------------------------
+
+/** `main` + a `feature` branch adding one file, plus a PR ref at the branch
+ * tip. `main` moves on afterwards, so a merge-base diff is distinguishable
+ * from a base-tip diff. */
+function scopedRepo(): string {
+  const dir = tempDir();
+  git(dir, ["init"]);
+  git(dir, ["config", "user.email", "test@example.com"]);
+  git(dir, ["config", "user.name", "Test"]);
+  writeFileSync(path.join(dir, "tsconfig.json"), JSON.stringify({ include: ["**/*.ts"] }));
+  writeFileSync(path.join(dir, "root.ts"), "export const root = 1;\n");
+  git(dir, ["add", "."]);
+  git(dir, ["commit", "-m", "root"]);
+  git(dir, ["branch", "-M", "main"]);
+  git(dir, ["checkout", "-q", "-b", "feature"]);
+  writeFileSync(path.join(dir, "feature.ts"), "export const feature = 1;\n");
+  git(dir, ["add", "."]);
+  git(dir, ["commit", "-m", "feature"]);
+  git(dir, ["update-ref", "refs/pull/7/head", "feature"]);
+  git(dir, ["checkout", "-q", "main"]);
+  writeFileSync(path.join(dir, "on-main.ts"), "export const onMain = 1;\n");
+  git(dir, ["add", "."]);
+  git(dir, ["commit", "-m", "main moved on"]);
+  return dir;
+}
+
+/** Worktree residue under a base root, by the 1.14 naming discipline. */
+function worktreeResidue(baseDir: string): string[] {
+  return readdirSync(baseDir, { recursive: true })
+    .map(String)
+    .filter((entry) => entry.includes("agtwt-"));
+}
+
+describe("review scopes (1.15)", () => {
+  it("reviews a branch inside a worktree, writes to the INVOKING repo, and leaves no residue", async () => {
+    const cwd = scopedRepo();
+    const worktreeBaseDir = tempDir();
+    const result = await runReview({
+      cwd,
+      scope: { kind: "branch", ref: "feature" },
+      analyzers: [okAnalyzer],
+      worktreeBaseDir,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.artifact.scope).toBe("branch-feature");
+    // Merge-base diff: what the branch ADDED, never what main moved on to.
+    expect(result.artifact.changedFiles).toEqual(["feature.ts"]);
+    // The exact ref is on the manifest; the slug is only a directory name.
+    expect(result.artifact.manifest.scope).toEqual({
+      kind: "branch",
+      ref: "feature",
+      base: "main",
+      baseGuessed: true,
+    });
+    // The guessed base is DECLARED and exit-neutral: a guess is not lost
+    // analysis coverage.
+    expect(result.declaredOnly.map((d) => d.subject)).toContain("scope-base");
+    expect(result.degradedRun).toBe(false);
+    // The write root is the invoking repo, whatever the analyze root was.
+    expect(result.repoRoot).toBe(
+      spawnSync("git", ["rev-parse", "--show-toplevel"], { cwd, encoding: "utf8" }).stdout.trim(),
+    );
+    expect(worktreeResidue(worktreeBaseDir)).toEqual([]);
+  });
+
+  it("produces a byte-identical artifact and runId for one ref from two DIFFERENT worktree paths, cache still warm", async () => {
+    const cwd = scopedRepo();
+    // A REAL finding, from the REAL analyzers: a stubbed analyzer emits a
+    // hardcoded location, so a leaked absolute analyze-root path in a
+    // finding's `location.file` would never appear in the bytes at all.
+    git(cwd, ["checkout", "-q", "feature"]);
+    writeFileSync(
+      path.join(cwd, "feature.ts"),
+      'export const awsKey = "AKIAABCDEFGHIJKLMNOP";\n',
+    );
+    git(cwd, ["commit", "-qam", "secret"]);
+    git(cwd, ["checkout", "-q", "main"]);
+    // Two distinct base roots → two distinct absolute analyze roots. If ANY
+    // of them reached a cache key, the runId or an artifact field, these two
+    // runs could not match — and the SECOND run could not hit the cache the
+    // first one populated.
+    const cacheSecretPath = path.join(tempDir(), "secret");
+    const options = { cwd, cacheSecretPath, scope: { kind: "branch", ref: "feature" } as const };
+    const first = await runReview({ ...options, worktreeBaseDir: tempDir() });
+    const second = await runReview({ ...options, worktreeBaseDir: tempDir() });
+    expect(first.ok && second.ok).toBe(true);
+    if (!first.ok || !second.ok) return;
+    expect(second.artifact.runId).toBe(first.artifact.runId);
+    expect(normalizeCacheTruth(second.artifactJson)).toBe(normalizeCacheTruth(first.artifactJson));
+    // `normalizeCacheTruth` erases `manifest.cache` — the ONE place a leaked
+    // worktree path in a cache key would show — so the cache truth is
+    // asserted separately: a cold run followed by a warm one from a DIFFERENT
+    // absolute path must hit.
+    expect(first.artifact.manifest.cache?.hits).toBe(0);
+    expect(second.artifact.manifest.cache?.misses).toBe(0);
+    expect(second.artifact.manifest.cache?.hits).toBeGreaterThan(0);
+    // The real analyzers found something, and its location is repo-relative.
+    expect(first.artifact.findings.length).toBeGreaterThan(0);
+    for (const finding of first.artifact.findings) {
+      expect(finding.location.file).toBe("feature.ts");
+    }
+    // No analyze-root path leaked into the bytes at all.
+    expect(first.artifactJson).not.toContain("agtwt-");
+    expect(first.artifactJson).not.toContain(JSON.stringify(os.tmpdir()).slice(1, -1));
+  });
+
+  it("analyzes IN PLACE when the reviewed ref is the current HEAD — the DIRTY tree is what gets read", async () => {
+    const cwd = scopedRepo();
+    const worktreeBaseDir = tempDir();
+    // `on-main.ts` is what `main` added since the fork — i.e. it IS the change
+    // set for this scope. Editing it WITHOUT committing is content only the
+    // in-place path can ever see: a worktree at `main` would hold the
+    // committed bytes and find nothing.
+    writeFileSync(
+      path.join(cwd, "on-main.ts"),
+      'export const awsKey = "AKIAABCDEFGHIJKLMNOP";\n',
+    );
+    const result = await runReview({
+      cwd,
+      // `main` IS HEAD: checking it out into a worktree would silently review
+      // a tree without the user's uncommitted state.
+      scope: { kind: "branch", ref: "main", base: "feature" },
+      worktreeBaseDir,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.artifact.changedFiles).toEqual(["on-main.ts"]);
+    expect(result.artifact.findings.map((f) => f.location.file)).toContain("on-main.ts");
+    expect(worktreeResidue(worktreeBaseDir)).toEqual([]);
+    // …and because the analyzed content is NOT the ref the manifest records,
+    // the divergence is DECLARED rather than left for the reader to guess.
+    expect(result.declaredOnly.map((d) => d.subject)).toContain("scope-in-place");
+  });
+
+  it("DECLARES an in-place ref scope whose working tree diverges from the reviewed ref", async () => {
+    const cwd = scopedRepo();
+    // `--project` has the identical property: the manifest says "the tracked
+    // tree", the bytes read are whatever the user has right now.
+    writeFileSync(path.join(cwd, "root.ts"), "export const root = 2;\n");
+    const dirty = await runReview({ cwd, scope: { kind: "project" }, analyzers: [okAnalyzer] });
+    expect(dirty.ok).toBe(true);
+    if (!dirty.ok) return;
+    const declared = dirty.declaredOnly.find((d) => d.subject === "scope-in-place");
+    expect(declared?.reason).toContain("root.ts");
+    // Exit-neutral: this is framing, not lost coverage.
+    expect(dirty.degradedRun).toBe(false);
+
+    // A clean tree says nothing — no noise on the normal path.
+    git(cwd, ["checkout", "--", "root.ts"]);
+    const clean = await runReview({ cwd, scope: { kind: "project" }, analyzers: [okAnalyzer] });
+    expect(clean.ok).toBe(true);
+    if (!clean.ok) return;
+    expect(clean.declaredOnly.map((d) => d.subject)).not.toContain("scope-in-place");
+  });
+
+  it("a file that cannot be READ at a ref scope is a DEGRADATION, never a silent deletion", async () => {
+    const cwd = scopedRepo();
+    // The change set comes from COMMITS: `on-main.ts` exists at `main`. Remove
+    // it from the working tree (in place, so the read comes from there) and
+    // the file becomes unreadable — which must not be filed as "the branch
+    // deleted it", which reads as a clean review of a smaller diff.
+    unlinkSync(path.join(cwd, "on-main.ts"));
+    const result = await runReview({
+      cwd,
+      scope: { kind: "branch", ref: "main", base: "feature" },
+      analyzers: [okAnalyzer],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.artifact.deletedFiles).toEqual([]);
+    expect(result.runDegraded.map((d) => d.subject)).toContain("on-main.ts");
+    expect(result.degradedRun).toBe(true);
+  });
+
+  it("DECLARES an empty ref diff — 'nothing was reviewed' must not look like 'nothing was wrong'", async () => {
+    const cwd = scopedRepo();
+    const result = await runReview({
+      cwd,
+      scope: { kind: "branch", ref: "main", base: "main" },
+      analyzers: [okAnalyzer],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.artifact.changedFiles).toEqual([]);
+    expect(result.declaredOnly.map((d) => d.subject)).toContain("scope-change-set");
+    expect(result.degradedRun).toBe(false);
+  });
+
+  it("carries the worktree lifecycle's own degradations onto the FAILURE result", async () => {
+    const cwd = scopedRepo();
+    const worktreeBaseRoot = tempDir();
+    // Residue whose `.git` points at another repository: reclaim DECLARES it
+    // (`unowned`) rather than deleting it…
+    const base = worktreeBaseDir(cwd, worktreeBaseRoot);
+    const foreign = path.join(base, "agtwt-0badc0de-foreig");
+    mkdirSync(foreign, { recursive: true });
+    writeFileSync(path.join(foreign, ".git"), `gitdir: ${path.join(tempDir(), ".git")}\n`);
+    // …and the create then FAILS: `.git/worktrees` cannot be created because
+    // a FILE sits where that directory belongs.
+    writeFileSync(path.join(cwd, ".git", "worktrees"), "not a directory\n");
+
+    const result = await runReview({
+      cwd,
+      scope: { kind: "branch", ref: "feature" },
+      analyzers: [okAnalyzer],
+      worktreeBaseDir: worktreeBaseRoot,
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    // Keeping only `lifecycle.reason` would drop the declaration entirely —
+    // the throwing path already harvests its degradations, this one must too.
+    expect(result.message).toContain("unowned");
+    expect(result.message).toContain(foreign);
+  });
+
+  it("reviews every tracked file for --project, in place", async () => {
+    const cwd = scopedRepo();
+    const result = await runReview({ cwd, scope: { kind: "project" }, analyzers: [okAnalyzer] });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.artifact.scope).toBe("project");
+    expect(result.artifact.changedFiles).toEqual(["on-main.ts", "root.ts", "tsconfig.json"]);
+    expect(result.artifact.manifest.scope).toEqual({ kind: "project" });
+  });
+
+  it("keys the findings cache by scope: a project run never serves an uncommitted run's entries", async () => {
+    // Every tracked file is dirty, so the uncommitted and project change sets
+    // are the SAME paths with the same on-disk content hashes — the scope is
+    // then the only term that differs between the two cache keys.
+    const cwd = tempRepoWithChange();
+    git(cwd, ["add", "."]);
+    git(cwd, ["commit", "-m", "everything"]);
+    writeFileSync(path.join(cwd, "change.ts"), "export const change = 2;\n");
+    writeFileSync(path.join(cwd, "base.txt"), "base v2\n");
+    writeFileSync(path.join(cwd, "tsconfig.json"), `${JSON.stringify({ include: ["**/*.ts"] })}\n`);
+    const cacheSecretPath = path.join(tempDir(), "secret");
+    const options = { cwd, cacheSecretPath, analyzers: [okAnalyzer] };
+
+    const uncommitted = await runReview(options);
+    const project = await runReview({ ...options, scope: { kind: "project" } });
+    const warmProject = await runReview({ ...options, scope: { kind: "project" } });
+    expect(uncommitted.ok && project.ok && warmProject.ok).toBe(true);
+    if (!uncommitted.ok || !project.ok || !warmProject.ok) return;
+    expect(project.artifact.changedFiles).toEqual(uncommitted.artifact.changedFiles);
+    // Same files, same content, different scope → a MISS, not a shared entry…
+    expect(project.artifact.manifest.cache).toEqual({ hits: 0, misses: 1, invalid: 0 });
+    // …and the key is otherwise stable, so the same scope hits.
+    expect(warmProject.artifact.manifest.cache).toEqual({ hits: 1, misses: 0, invalid: 0 });
+  });
+
+  it("records gh PR metadata when gh answers, and DECLARES every failure mode without gating", async () => {
+    const cwd = scopedRepo();
+    const good = await runReview({
+      cwd,
+      scope: { kind: "pr", ref: "7" },
+      analyzers: [okAnalyzer],
+      worktreeBaseDir: tempDir(),
+      gh: () => ({
+        status: 0,
+        stdout: JSON.stringify({
+          title: "Add feature",
+          baseRefName: "main",
+          headRefName: "feature",
+          author: { login: "octocat" },
+        }),
+        stderr: "",
+      }),
+    });
+    expect(good.ok).toBe(true);
+    if (!good.ok) return;
+    expect(good.artifact.scope).toBe("pr-7");
+    expect(good.artifact.manifest.pr).toEqual({
+      id: "7",
+      title: "Add feature",
+      baseRef: "main",
+      headRef: "feature",
+      author: "octocat",
+    });
+
+    for (const gh of [
+      () => ({ status: 1, stdout: "", stderr: "gh: not authenticated" }),
+      () => ({ status: null, stdout: "", stderr: "spawn gh ENOENT" }),
+      () => ({ status: 0, stdout: "not json at all", stderr: "" }),
+      () => ({ status: 0, stdout: JSON.stringify({ title: 42 }), stderr: "" }),
+    ]) {
+      const degraded = await runReview({
+        cwd,
+        scope: { kind: "pr", ref: "7" },
+        analyzers: [okAnalyzer],
+        worktreeBaseDir: tempDir(),
+        gh,
+      });
+      expect(degraded.ok).toBe(true);
+      if (!degraded.ok) continue;
+      // The review completes, metadata is absent, and the reason is declared
+      // — never a gate.
+      expect(degraded.artifact.manifest.pr).toBeUndefined();
+      expect(degraded.degradedRun).toBe(false);
+      expect(degraded.declaredOnly.map((d) => d.subject)).toContain("gh-pr-metadata");
+    }
+  });
+
+  it("folds the gh OUTCOME into the runId, so different metadata cannot overwrite one artifact", async () => {
+    const cwd = scopedRepo();
+    const options = {
+      cwd,
+      scope: { kind: "pr", ref: "7" } as const,
+      analyzers: [okAnalyzer],
+    };
+    const view = (title: string) => () => ({
+      status: 0,
+      stdout: JSON.stringify({
+        title,
+        baseRefName: "main",
+        headRefName: "feature",
+        author: { login: "octocat" },
+      }),
+      stderr: "",
+    });
+    const withGh = await runReview({ ...options, worktreeBaseDir: tempDir(), gh: view("Add feature") });
+    const renamed = await runReview({ ...options, worktreeBaseDir: tempDir(), gh: view("Renamed") });
+    const withoutGh = await runReview({
+      ...options,
+      worktreeBaseDir: tempDir(),
+      gh: () => ({ status: null, stdout: "", stderr: "spawn gh ENOENT" }),
+    });
+    expect(withGh.ok && renamed.ok && withoutGh.ok).toBe(true);
+    if (!withGh.ok || !renamed.ok || !withoutGh.ok) return;
+    // `manifest.pr` and the gh degradation are artifact CONTENT that no other
+    // identity input covers: sharing a runId would silently overwrite one
+    // artifact's bytes with the other's under the same file name.
+    expect(new Set([withGh.artifact.runId, renamed.artifact.runId, withoutGh.artifact.runId]).size)
+      .toBe(3);
+    // The same outcome is still stable — identity, not a timestamp.
+    const again = await runReview({ ...options, worktreeBaseDir: tempDir(), gh: view("Add feature") });
+    expect(again.ok).toBe(true);
+    if (!again.ok) return;
+    expect(again.artifact.runId).toBe(withGh.artifact.runId);
+  });
+
+  it("fails preflight for an absent PR ref naming the fetch command, and for a hostile ref", async () => {
+    const cwd = scopedRepo();
+    const absent = await runReview({ cwd, scope: { kind: "pr", ref: "999" } });
+    expect(absent.ok).toBe(false);
+    if (absent.ok) return;
+    expect(absent.code).toBe("preflight");
+    expect(absent.message).toContain("git fetch origin pull/999/head:refs/pull/999/head");
+
+    const hostile = await runReview({ cwd, scope: { kind: "branch", ref: "--upload-pack=x" } });
+    expect(hostile.ok).toBe(false);
+    if (!hostile.ok) expect(hostile.message).toContain('begins with "-"');
+  });
+
+  it("removes the worktree even when the pipeline itself throws inside the scope", async () => {
+    const cwd = scopedRepo();
+    const worktreeBaseDir = tempDir();
+    // A duplicate registration throws OUT of the pipeline (not through
+    // analyzer isolation) — 1.14's `finally` contract must still hold.
+    await expect(
+      runReview({
+        cwd,
+        scope: { kind: "branch", ref: "feature" },
+        analyzers: [okAnalyzer, okAnalyzer],
+        worktreeBaseDir,
+      }),
+    ).rejects.toThrow(DuplicateAnalyzerError);
+    expect(worktreeResidue(worktreeBaseDir)).toEqual([]);
+  });
 });

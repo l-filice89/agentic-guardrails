@@ -1,9 +1,13 @@
 /**
- * `guardrails review` — uncommitted scope (the only scope until 1.15).
+ * `guardrails review` — four scopes since 1.15: the uncommitted working tree
+ * (the default, unchanged), `--branch [ref]`, `--pr <id>`, and `--project`.
+ * A reviewed ref that is not HEAD is analyzed inside a temporary worktree
+ * while the artifact is always written to the INVOKING repository.
  * Exit codes: 0 clean · 1 pipeline gate failed (blocking axiom over its
  * error-finding threshold — config plane, 1.6) · 2 degraded run or
  * preflight/config/persistence failure (degradation dominates: a run that
- * silently lost coverage must never look merely "failed lint").
+ * silently lost coverage must never look merely "failed lint"). The artifact
+ * disposition never touches the exit code.
  */
 import path from "node:path";
 
@@ -12,7 +16,10 @@ import {
   runReview,
   writeReviewArtifact,
   type ReviewArtifact,
+  type ScopeRequest,
 } from "@agentic-guardrails/core";
+
+import { disposeArtifact } from "./disposition.js";
 
 /** Explicit axiom → category labels (never inferred from a finding's ruleId
  * — an axiom with zero findings of its lead rule must still label correctly).
@@ -26,11 +33,56 @@ export const AXIOM_CATEGORY: Record<string, string> = {
   "6": "conformance",
 };
 
-export async function reviewCommand(cwd: string): Promise<number> {
+/** The scope flags as commander hands them over. `--branch` takes an OPTIONAL
+ * value, so `true` means "the checked-out branch". */
+export interface ReviewCommandOptions {
+  branch?: string | boolean;
+  pr?: string;
+  project?: boolean;
+  base?: string;
+  /** commander's `--no-input`: false disables the disposition prompt. */
+  input?: boolean;
+}
+
+/**
+ * Maps the flag surface onto one scope request. Mutual exclusion of the three
+ * scope flags is enforced by commander (`.conflicts`), so reaching here with
+ * two of them set is impossible; `--base` without a diffing scope is a usage
+ * error rather than a silently ignored flag.
+ */
+export function scopeFromOptions(
+  options: ReviewCommandOptions,
+): { ok: true; scope: ScopeRequest } | { ok: false; message: string } {
+  const request: ScopeRequest =
+    options.pr !== undefined
+      ? { kind: "pr", ref: options.pr }
+      : options.project === true
+        ? { kind: "project" }
+        : options.branch !== undefined
+          ? { kind: "branch", ...(typeof options.branch === "string" ? { ref: options.branch } : {}) }
+          : { kind: "uncommitted" };
+  if (options.base === undefined) return { ok: true, scope: request };
+  if (request.kind !== "branch" && request.kind !== "pr") {
+    return { ok: false, message: "--base applies to --branch and --pr only" };
+  }
+  return { ok: true, scope: { ...request, base: options.base } };
+}
+
+export async function reviewCommand(
+  cwd: string,
+  options: ReviewCommandOptions = {},
+): Promise<number> {
   try {
-    const result = await runReview({ cwd });
+    const requested = scopeFromOptions(options);
+    if (!requested.ok) {
+      process.stderr.write(`guardrails review: ${requested.message}\n`);
+      return 2;
+    }
+    const result = await runReview({ cwd, scope: requested.scope });
     if (!result.ok) {
-      process.stderr.write(`guardrails review: ${result.message}\n`);
+      // A typed failure message embeds git's stderr and repository paths —
+      // untrusted text on its way to a terminal, sanitized like the rest.
+      process.stderr.write(`guardrails review: ${sanitizeMessage(result.message)}\n`);
       return 2;
     }
 
@@ -83,22 +135,42 @@ export async function reviewCommand(cwd: string): Promise<number> {
     // "declared only" means), but an inconclusive run must never print the
     // same thing a clean one prints.
     for (const d of result.declaredOnly) {
-      process.stderr.write(`guardrails review: inconclusive: ${d.reason} (${d.subject})\n`);
+      process.stderr.write(`guardrails review: inconclusive: ${degradationText(d)}\n`);
     }
 
     if (result.degradedRun) {
       // Zero-SILENT-degradation: every reason is printed, one line each.
       for (const d of result.runDegraded) {
-        process.stderr.write(`guardrails review: degraded: ${d.reason} (${d.subject})\n`);
+        process.stderr.write(`guardrails review: degraded: ${degradationText(d)}\n`);
       }
-      return 2;
     }
+
+    // Commit-or-drop (1.15), AFTER the report and never affecting the exit
+    // code below: a non-TTY, `--no-input`, or EOF all drop, so no pipeline or
+    // CI run can be surprised by a commit.
+    const disposition = await disposeArtifact({
+      repoRoot: result.repoRoot,
+      artifactPath,
+      runId: result.artifact.runId,
+      scope: result.artifact.scope,
+      interactive:
+        options.input !== false && process.stdin.isTTY === true && process.stdout.isTTY === true,
+    });
+    for (const raw of disposition.lines) {
+      // Commit failures carry git's stderr verbatim — sanitized like every
+      // other untrusted string that reaches the terminal.
+      const line = sanitizeMessage(raw);
+      if (line.startsWith("degraded:")) process.stderr.write(`guardrails review: ${line}\n`);
+      else process.stdout.write(`${line}\n`);
+    }
+
+    if (result.degradedRun) return 2;
     // Exit 1 is the pipeline's gate verdict (enforcement + maxFindings), not
     // a raw any-error-finding rule — advisory findings never flip the code.
     return result.gate.pass ? 0 : 1;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    process.stderr.write(`guardrails review: ${message}\n`);
+    process.stderr.write(`guardrails review: ${sanitizeMessage(message)}\n`);
     return 2;
   }
 }
@@ -114,7 +186,7 @@ export function formatSummary(
   // NFR-8: degraded work is IN the report header, above the findings block
   // — a failed axiom (or any lost coverage) can never hide below the fold.
   for (const d of runDegraded) {
-    lines.push(`degraded: ${d.subject} — ${d.reason}`);
+    lines.push(`degraded: ${sanitizeMessage(d.subject)} — ${sanitizeMessage(d.reason)}`);
   }
 
   const byAxiom = new Map<string, Finding[]>();
@@ -143,10 +215,18 @@ export function formatSummary(
   return `${lines.join("\n")}\n`;
 }
 
-/** Finding messages can embed analyzed-file content — C0 control characters
- * (except \n and \t) are stripped so a message can never smuggle terminal
- * escape sequences into the report. Code-point filter, not a regex literal,
- * so no control character ever appears in this source file. */
+/** One degradation as a terminal line. Degradation reasons embed subprocess
+ * stderr (`gh`, git) and analyzed-file paths, so a hostile `gh` on PATH — or
+ * a repository with a crafted path — could otherwise write ANSI escapes
+ * straight to the user's terminal. Same sanitizer as finding messages. */
+export function degradationText(degradation: { reason: string; subject: string }): string {
+  return `${sanitizeMessage(degradation.reason)} (${sanitizeMessage(degradation.subject)})`;
+}
+
+/** Untrusted text can embed analyzed-file content and subprocess stderr — C0
+ * control characters (except \n and \t) are stripped so nothing can smuggle
+ * terminal escape sequences into the report. Code-point filter, not a regex
+ * literal, so no control character ever appears in this source file. */
 function sanitizeMessage(message: string): string {
   return [...message]
     .filter((c) => c === "\n" || c === "\t" || c.charCodeAt(0) >= 0x20)

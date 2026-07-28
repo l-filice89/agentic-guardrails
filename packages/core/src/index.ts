@@ -23,16 +23,27 @@ export * from "./config/config-loader.js";
 // Explicit, not `export *`: `gitCommand` ("run any git subcommand in any
 // cwd") stays an internal seam and is deliberately absent from this surface.
 export {
+  commitPath,
+  DEFAULT_BASE_CANDIDATES,
+  diffRefs,
   EMPTY_TREE_SHA,
   fileGitStatus,
   GIT_TIMEOUT_MS,
   headSha,
   isRepo,
+  lsFiles,
+  mergeBase,
+  parseNameStatusZ,
   parsePorcelainZ,
+  refExists,
   repoRoot,
+  resolveDefaultBase,
+  revParse,
   uncommittedFiles,
+  type CommitPathOutcome,
   type FileGitStatus,
   type GitResult,
+  type RefDiff,
   type GitRunOptions,
   type RepoRootFailureKind,
   type RepoRootResult,
@@ -43,6 +54,8 @@ export * from "./init/init.js";
 export * from "./init/wiring.js";
 export * from "./knowledge/structural-seed.js";
 export * from "./persistence/artifact-writer.js";
+export * from "./pipeline/gh-metadata.js";
 export * from "./pipeline/manifest.js";
 export * from "./pipeline/merge.js";
 export * from "./pipeline/pipeline.js";
+export * from "./pipeline/scope.js";

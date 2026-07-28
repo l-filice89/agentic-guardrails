@@ -10,6 +10,107 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Review scopes — branch, PR and project (Story 1.15, FR-25): `guardrails
+  review` gains `--branch [ref]`, `--pr <id>`, `--project` (mutually
+  exclusive), `--base <ref>` and `--no-input`. Bare `guardrails review` is
+  unchanged, down to the artifact bytes (the manifest's new `scope` block is
+  omitted for the uncommitted scope). The structural change is the
+  **analyze/write split**: `analyzeRoot` (a detached `git worktree` when the
+  reviewed ref is not HEAD) supplies the change set, file reads, content
+  hashes and tsconfig discovery, while `outputRoot` — ALWAYS the invoking
+  repository — owns config, both cache tiers, the corpus seed, git-wiring
+  preflight and the artifact write, so a deleted worktree can never take the
+  output with it. No absolute analyze-root path may enter a cache key, a
+  runId, an artifact field or a finding location; the same ref reviewed from
+  two different worktree paths produces a byte-identical artifact, an identical
+  runId, and a WARM cache on the second run (directly tested, through the real
+  analyzers). Every `fs` call on an analyze-root path goes through `fsPath`
+  (`\?\` prefixing), including the artifact write and the cache-key reads,
+  where a long path would otherwise read as "not found" or disable the cache
+  for the whole run. A worktree is created ONLY when the ref
+  is not the current HEAD — reviewing HEAD inside a worktree would silently
+  drop uncommitted state — and goes through 1.14's `withWorktree()`
+  unchanged, with removal degradations reaching the manifest via
+  `toManifestDegradation()` and a removal that failed on the throwing path
+  read back with `worktreeDegradationsOf()`. New scope plane
+  (`pipeline/scope.ts`): one resolver, four change-set producers, and the
+  `_agentic-guardrails/` exclusion in ONE place downstream of all four.
+  Directory slugs are lossy by construction, so a lossy derivation carries an
+  8-hex `sha256(ref)` suffix (`feat/Foo` and `feat-foo` can never share a
+  directory) and the exact ref is recorded verbatim on the manifest instead;
+  the slug BODY is capped (48 chars) so an unbounded ref name cannot blow past
+  `MAX_PATH`/`ENAMETOOLONG` at persistence, after the whole analysis has been
+  paid for. `SCOPE_PATTERN` widened to admit digits (`pr-42`) and
+  de-duplicated: it now lives once, in contracts, with a repository-wide scan
+  that fails if a second definition appears — including the pre-1.15 spelling
+  (`/^[a-z][a-z-]*$/`), the copy a careless revert would bring back. New typed
+  git primitives (`mergeBase`, `diffRefs`, `lsFiles`, `revParse` (peeling
+  `^{commit}`, so an annotated tag at HEAD compares equal to HEAD instead of
+  building a pointless worktree), `refExists`, `currentBranch`,
+  `resolveDefaultBase`, `commitPath`) — ref-guarded by `refProblem` (moved
+  beside the spawn it protects), terminated with `--` / `--end-of-options`,
+  and keeping the 120 s timeout, 64 MiB `maxBuffer` and `GIT_TERMINAL_PROMPT=0`.
+  `gitCommand` remains an internal seam.
+- **No network, anywhere in this story**: a `--pr` ref must already be present
+  locally (`refs/pull/<id>/head`, then `refs/remotes/origin/pull/<id>/head`);
+  an absent one is a typed preflight failure carrying the exact `git fetch`
+  command. Optional PR metadata comes from the user's own `gh` client
+  (`gh pr view --json`, 10 s budget) parsed through a contracts schema and
+  mapped field by field onto the manifest — absent, unauthenticated,
+  erroring, timing-out or unparseable `gh` is a DECLARED, exit-neutral
+  degradation and never a gate — and one that PARTICIPATES in the runId, so
+  the same PR ref with and without `gh` (or after a title edit on GitHub)
+  cannot overwrite one artifact with different bytes. `GUARDRAILS_NO_GH=1`
+  keeps `gh` out of the loop entirely. A PR id with leading zeros (`007`) is
+  rejected: it would probe the wrong ref, file under the wrong directory and
+  ask `gh` about a different PR. A guessed diff base is declared the same way
+  (the default-base search order is `refs/remotes/origin/HEAD` → `origin/main`
+  → `main` → `master`; no candidate is a typed failure naming `--base`, never
+  a silent full-history diff).
+- Artifact disposition — commit or drop (Story 1.15, `packages/cli/src/
+  disposition.ts`): on an interactive TTY the run offers to commit the
+  artifact. Because `reviews/` is gitignored by design (1.8), "commit" is
+  `git add -f` on that ONE file plus a PATHSPEC-LIMITED `[skip ci]` commit —
+  it never edits `.gitignore`, never `git add -A`, and leaves the rest of the
+  index and working tree byte-identical (asserted). EOF, a non-TTY, and
+  `--no-input` all DROP (the safe default, reusing `eofSafeIo`'s
+  note-emitted-once behaviour from `init`), as does **Ctrl-C** at the prompt —
+  readline's SIGINT is caught and settled through the EOF path instead of
+  exiting 130 and discarding the computed gate verdict; drop deletes nothing
+  and makes no git call. `y`/`yes` counts as commit alongside `c`/`commit`.
+  The commit passes `--no-verify`: the artifact is machine-written generated
+  output, and a lint-staged style `pre-commit` hook would otherwise run
+  against the user's MAIN index during our partial commit (everything the
+  user commits is still hooked). A detached `HEAD` is refused rather than
+  committed — git would succeed there and leave an orphan no branch points
+  at — and a deterministic RE-RUN, whose identical bytes are already in
+  `HEAD`, is reported as `already committed (unchanged)` instead of the
+  "nothing to commit" exit status masquerading as a failure. A commit that
+  genuinely cannot happen unstages the artifact, copies it to an OS temp
+  directory and reports that path as a declared degradation. Disposition
+  never changes the exit code.
+- Cross-process worktree liveness (`.agtwt-live`): every worktree created by
+  `withWorktree()` carries a file holding its creator's pid, and reclamation
+  skips a worktree whose marker names a LIVE process. Before this, the live
+  set was in-process only, so a second `guardrails` run on the SAME
+  repository saw the first one's registered, correctly-owned, unlocked
+  worktree as residue and removed it mid-analysis — the first run's files
+  then landed in `deletedFiles` and it reported a clean review. (1.14 closed
+  this across repositories via the namespaced base; 1.15 is the first
+  consumer that makes the same-repo axis reachable.) A concurrent run is
+  skipped SILENTLY — a reclaim degradation is a real one, and one run must
+  not drive another's exit code — while a registered, on-disk worktree whose
+  liveness cannot be established is DECLARED under the new `in-use`
+  degradation kind and never deleted.
+- Two new DECLARED, exit-neutral degradations on the scope plane:
+  `scope-in-place` (a ref scope analyzed in place — `--branch <current>`,
+  `--project` — while the working tree is dirty, so the analyzed bytes are
+  not the ref the manifest records) and `scope-change-set` (an EMPTY ref
+  diff: `--branch main --base main`, or an already-merged branch, which
+  otherwise produced a clean exit-0 artifact indistinguishable from a real
+  review). Ref-scope change sets now come from `diff --name-status -z`, so a
+  DELETED path is the one git named and any other unreadable file is a real
+  degradation rather than a silent "deleted" entry.
 - Worktree isolation lifecycle (Story 1.14 / SPIKE-5,
   `packages/core/src/git/worktree.ts`): `withWorktree()` creates a detached
   worktree at a target ref, runs the caller's callback inside it, and always
@@ -353,6 +454,10 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - `docs/adr/ADR-002-repo-layout.md` and `docs/adr/ADR-005-contracts-package.md`.
 
 ### Changed
+- The CLI's `exitOverride` is now installed BEFORE the subcommands are
+  created, so they inherit it: a usage error raised by a subcommand (a
+  `--pr 1 --project` conflict, a bad option) exits 2 as the documented exit
+  contract says, instead of falling through to commander's default 1.
 - Config plane: `configSchema` no longer injects a synthetic
   `axioms: {"5": {enforcement: "blocking"}}` entry into every parsed config.
   The gate's `EFFECTIVE_DEFAULTS` already blanket every unconfigured axiom

@@ -11,7 +11,15 @@
  * that holds either way.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -20,6 +28,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   fromManifestDegradation,
+  LIVE_MARKER_NAME,
   MAX_BASE_PATH_LENGTH,
   parseWorktreeList,
   prepareWorktreeBase,
@@ -418,6 +427,71 @@ describe("removeWorktree", () => {
   });
 });
 
+/** A pid that is guaranteed NOT to be running: a child process, read after it
+ * has already exited. Nothing else can be asserted about an arbitrary number
+ * — the OS may well have handed it to somebody. */
+function deadPid(): number {
+  const child = spawnSync(process.execPath, ["-e", ""], { encoding: "utf8" });
+  const pid = child.pid;
+  if (pid === undefined) throw new Error("could not spawn a probe process");
+  return pid;
+}
+
+describe("cross-process liveness (1.15)", () => {
+  it("does NOT reclaim another live PROCESS's worktree, marker pid alive", async () => {
+    const { repoRoot, baseRoot, base } = fixture();
+    // Exactly the shape a sibling `guardrails` run leaves while it works:
+    // registered, correctly prefixed, owned by this repo, unlocked, and NOT
+    // in this process's in-memory live set — which is all the pre-1.15 guard
+    // had. `process.pid` is a pid that is unquestionably alive.
+    const sibling = path.join(base, `${WORKTREE_PREFIX}0badc0de-live01`);
+    git(repoRoot, ["worktree", "add", "--detach", sibling, "HEAD"]);
+    writeFileSync(path.join(sibling, LIVE_MARKER_NAME), `${process.pid}\n`);
+    const analyzed = path.join(sibling, "a.ts");
+
+    const result = await reclaimWorktrees({ repoRoot, baseDir: baseRoot });
+
+    expect(result.reclaimed).toEqual([]);
+    // The files the sibling is analyzing are still there — removing them out
+    // from under it would turn its whole change set into "deleted files" and
+    // let it report a clean review.
+    expect(existsSync(analyzed)).toBe(true);
+    // A concurrent run is normal operation, not a degradation: declaring it
+    // would let one run drive another's exit code to 2.
+    expect(result.degradations).toEqual([]);
+
+    // And a full lifecycle beside it leaves it alone too.
+    const lifecycle = await withWorktree({ repoRoot, ref: "HEAD", baseDir: baseRoot }, () => "ok");
+    expect(lifecycle.ok).toBe(true);
+    expect(existsSync(analyzed)).toBe(true);
+    git(repoRoot, ["worktree", "remove", "--force", sibling]);
+  });
+
+  it("DECLARES a registered worktree whose liveness cannot be established, never removes it", async () => {
+    const { repoRoot, baseRoot, base } = fixture();
+    const unknown = path.join(base, `${WORKTREE_PREFIX}0badc0de-unkn01`);
+    git(repoRoot, ["worktree", "add", "--detach", unknown, "HEAD"]);
+    // No marker at all: the window between `worktree add` and the marker
+    // write. Conservative — it might be somebody's live scope.
+    const result = await reclaimWorktrees({ repoRoot, baseDir: baseRoot });
+
+    expect(result.reclaimed).toEqual([]);
+    expect(result.degradations.map((d) => d.kind)).toEqual(["in-use"]);
+    expect(existsSync(unknown)).toBe(true);
+    git(repoRoot, ["worktree", "remove", "--force", unknown]);
+  });
+
+  it("withWorktree writes the marker with THIS process's pid", async () => {
+    const { repoRoot, baseRoot } = fixture();
+    const seen = await withWorktree({ repoRoot, ref: "HEAD", baseDir: baseRoot }, (worktreePath) =>
+      readFileSync(path.join(worktreePath, LIVE_MARKER_NAME), "utf8").trim(),
+    );
+    expect(seen.ok).toBe(true);
+    if (!seen.ok) return;
+    expect(seen.value).toBe(String(process.pid));
+  });
+});
+
 describe("reclaimWorktrees", () => {
   it("removes residue with no registration", async () => {
     const { repoRoot, baseRoot, base } = fixture();
@@ -463,6 +537,9 @@ describe("reclaimWorktrees", () => {
     const { repoRoot, baseRoot, base } = fixture();
     const worktreePath = path.join(base, `${WORKTREE_PREFIX}0badc0de-000002`);
     git(repoRoot, ["worktree", "add", "--detach", worktreePath, "HEAD"]);
+    // What a SIGKILLed run leaves: its liveness marker, holding a pid that is
+    // no longer alive. Reclamation is exactly the recovery path for it.
+    writeFileSync(path.join(worktreePath, LIVE_MARKER_NAME), `${deadPid()}\n`);
 
     const result = await reclaimWorktrees({ repoRoot, baseDir: baseRoot });
     expect(result.reclaimed.map((p) => path.resolve(p))).toEqual([path.resolve(worktreePath)]);

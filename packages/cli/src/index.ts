@@ -8,12 +8,12 @@
  * findings · 2 everything unexpected — usage errors, unknown subcommands, a
  * bare invocation, and crashes. Never a silent 0.
  */
-import { Command, CommanderError } from "commander";
+import { Command, CommanderError, Option } from "commander";
 
 import { ENGINE_VERSION } from "@agentic-guardrails/core";
 
 import { initCommand } from "./init-command.js";
-import { reviewCommand } from "./review-command.js";
+import { reviewCommand, type ReviewCommandOptions } from "./review-command.js";
 
 const program = new Command();
 program
@@ -21,6 +21,12 @@ program
   .description("Deterministic-first code review guardrails")
   // Single-sourced from core (see ENGINE_VERSION's provenance comment).
   .version(ENGINE_VERSION);
+
+// exitOverride turns commander's process.exit into a typed throw so WE own
+// the exit code: usage errors must exit 2, not commander's default 1. Set
+// BEFORE the subcommands are created so they inherit it — a `--pr 1 --project`
+// conflict is raised by the subcommand, not by the program.
+program.exitOverride();
 
 program
   .command("init")
@@ -30,16 +36,28 @@ program
     process.exitCode = await initCommand(process.cwd(), options);
   });
 
+// Scope flags are mutually exclusive through commander's own `conflicts`, so
+// `--pr 1 --project` is a usage error (exit 2 via exitOverride) rather than a
+// silent precedence rule the user has to guess.
 program
   .command("review")
-  .description("Review uncommitted changes (staged, unstaged, untracked)")
-  .action(async () => {
-    process.exitCode = await reviewCommand(process.cwd());
+  .description("Review uncommitted changes, a branch, a locally fetched PR ref, or the project")
+  .addOption(
+    new Option("--branch [ref]", "review a branch ref against its merge-base (default: HEAD's branch)")
+      .conflicts(["pr", "project"]),
+  )
+  .addOption(
+    new Option("--pr <id>", "review a LOCALLY FETCHED pull-request ref (no network)")
+      .conflicts(["branch", "project"]),
+  )
+  .addOption(
+    new Option("--project", "review every tracked file, not a diff").conflicts(["branch", "pr"]),
+  )
+  .option("--base <ref>", "diff base for --branch/--pr (default: the repo's default branch)")
+  .option("--no-input", "skip the commit-or-drop prompt and leave the artifact untracked")
+  .action(async (options: ReviewCommandOptions) => {
+    process.exitCode = await reviewCommand(process.cwd(), options);
   });
-
-// exitOverride turns commander's process.exit into a typed throw so WE own
-// the exit code: usage errors must exit 2, not commander's default 1.
-program.exitOverride();
 
 try {
   if (process.argv.length <= 2) {

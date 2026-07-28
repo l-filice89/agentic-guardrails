@@ -218,6 +218,82 @@ The v2 runtime lives in a pnpm-workspaces monorepo under `packages/`:
   their bytes; absent inputs are declared with sentinel hashes and typed
   degradation entries — never faked.
 
+### Review scopes (`--branch` / `--pr` / `--project`)
+
+`guardrails review` reviews four things. Bare `guardrails review` is unchanged
+— the uncommitted working tree, filed under `reviews/uncommitted/`.
+
+| Flag | Change set | Artifact directory |
+|---|---|---|
+| *(none)* | staged + unstaged + untracked | `reviews/uncommitted/` |
+| `--branch [ref]` | `diff` from the merge-base of the base ref and `ref` (default: the checked-out branch) | `reviews/branch-{slug}/` |
+| `--pr <id>` | same, over a **locally fetched** PR ref | `reviews/pr-{id}/` |
+| `--project` | every tracked file (not a diff) | `reviews/project/` |
+
+The three scope flags are mutually exclusive (exit 2). `--base <ref>` pins the
+diff base for `--branch`/`--pr`; without it the repo's own default branch is
+resolved in order — `refs/remotes/origin/HEAD`, `origin/main`, `main`,
+`master` — and anything below the first is **declared as a guess** on stderr.
+No candidate at all is a typed failure naming `--base`, never a silent
+full-history diff.
+
+**Isolated execution means isolated from a ref checkout.** A worktree is
+created ONLY when the reviewed ref is not the current HEAD; reviewing a ref
+that already is HEAD (and `--project`) analyzes in place, because checking it
+out into a worktree would silently drop your uncommitted state. The worktree
+is detached, removed in a `finally`, and swept by the next run's reclamation
+if a process is killed before it gets there (Story 1.14 / SPIKE-5). Artifacts
+are always written to the **invoking** repository — the worktree is deleted,
+so nothing written inside it survives.
+
+**No network, at all.** A `--pr` ref must already be present locally
+(`refs/pull/<id>/head` or `refs/remotes/origin/pull/<id>/head`); an absent one
+fails with the exact `git fetch` command to run. Nothing is fetched, nothing is
+pushed (Epic 5 owns remote flows). If `gh` happens to be on PATH and
+authenticated it is asked — through the user's own client, parsed through a
+schema — for PR title/base/head/author; every failure mode (absent,
+unauthenticated, erroring, timing out, unparseable) is a declared degradation
+and never a gate.
+
+**Artifact disposition — commit or drop.** `reviews/` is gitignored by design,
+so on an interactive TTY the run offers to `git add -f` **that one file** and
+make a pathspec-limited `[skip ci]` commit (`c`/`commit` or `y`/`yes`). It
+never edits `.gitignore`, never `git add -A`, and leaves the rest of your index
+and working tree byte-identical — including `--no-verify`, so a lint-staged
+style `pre-commit` hook cannot stage or rewrite files during our partial
+commit; the artifact is generated output, not your work, and every commit *you*
+make is still hooked. EOF, a pipe, CI, `--no-input`, and Ctrl-C at the prompt
+all **drop** — the artifact stays on disk, untracked. Re-running a
+deterministic review re-commits nothing: identical bytes already in `HEAD` are
+reported as `already committed (unchanged)`. A commit that cannot happen (a
+detached `HEAD`, a mid-merge index, a hook that survives `--no-verify`) copies
+the artifact to a temp directory and reports the path. Disposition never
+changes the exit code.
+
+`GUARDRAILS_NO_GH=1` keeps the optional `gh pr view` lookup out of the loop
+entirely (it degrades exactly as an absent `gh`) — useful in tests and on
+machines where `gh` must never be invoked.
+
+**Concurrent runs.** Every worktree carries a `.agtwt-live` file holding the
+pid of the process that created it, so reclamation skips a worktree another
+*process* is still using — two `guardrails` runs against the same repository no
+longer delete each other's analysis. A registered worktree on disk whose
+liveness cannot be established (no readable marker) is **declared** (`in-use`)
+and left alone rather than removed; clear it with `git worktree remove` if it
+really is residue. Ceilings: liveness is a pid check, not a lease, so a pid
+recycled by an unrelated process keeps its worktree un-reclaimable until a
+human removes it; and git is spawned with `spawnSync`, so a removal plus its
+backoff blocks the event loop for its duration — do not expect overlap from
+concurrent scopes *within* one process.
+
+**In-place runs declare their divergence.** `--branch <current>` and
+`--project` analyze the working tree you are standing in (see above), so the
+change set comes from commits while the bytes come from your tree. When that
+tree is dirty the run says so — `inconclusive: analyzed IN PLACE with N
+uncommitted change(s) …` — and an empty ref diff (`--branch main --base main`,
+an already-merged branch) is declared too, so "nothing was reviewed" never
+reads as "nothing was wrong". Neither changes the exit code.
+
 ### Bootstrap (`guardrails init`)
 
 `guardrails init` bootstraps `_agentic-guardrails/` in a git repo: a
