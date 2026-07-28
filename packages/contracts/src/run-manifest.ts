@@ -4,6 +4,16 @@ import { enforcementSchema } from "./config.js";
 import { prMetadataSchema } from "./pr-metadata.js";
 
 /**
+ * The four review scopes (1.15). Declared ONCE here — the manifest's scope
+ * block, the trend record's `scopeKind` and core's `ScopeKind` type all read
+ * from this value, so a fifth scope cannot land in one of them and silently
+ * fail to parse in the others.
+ */
+export const scopeKindSchema = z.enum(["uncommitted", "branch", "pr", "project"]);
+
+export type ScopeKind = z.infer<typeof scopeKindSchema>;
+
+/**
  * RunManifest — the zero-silent-degradation carrier. Every run records
  * exactly what analyzed what: content hashes, versions, which tiers were
  * enabled, and (when the LLM tier ran) which model — including where that
@@ -100,7 +110,7 @@ export const runManifestSchema = z
      * still parse; absent means the uncommitted working tree. */
     scope: z
       .strictObject({
-        kind: z.enum(["uncommitted", "branch", "pr", "project"]),
+        kind: scopeKindSchema,
         /** The reviewed ref, VERBATIM (absent for `uncommitted`). */
         ref: z.string().min(1).optional(),
         /** Diff base for `branch`/`pr`; absent for the non-diff kinds. */

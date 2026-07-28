@@ -1,9 +1,15 @@
 {
   "schemaVersion": 1,
-  "recordId": "trend-0001",
+  "recordId": "f425e2f9c36ee1077983bcb12700a10e22f33fd94876019e04e2120feeaf6053",
+  "runId": "0123456789abcdef",
   "commitSha": "20460ade5621625ff09fa73e4a2a5f9802e4358c",
+  "scopeKind": "branch",
   "axiomSeverityCounts": {
-    "5": { "error": 2, "warning": 4, "info": 1 }
+    "5": {
+      "error": 2,
+      "warning": 4,
+      "info": 1
+    }
   },
-  "changedKloc": 0.42
+  "changedKlocMilli": 420
 }

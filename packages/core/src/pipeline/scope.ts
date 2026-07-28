@@ -13,22 +13,31 @@
  * record of what was reviewed — `manifest.scope.ref` carries the ref verbatim.
  */
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 
-import { SCOPE_PATTERN, type Degradation } from "@agentic-guardrails/contracts";
+import { SCOPE_PATTERN, type Degradation, type ScopeKind } from "@agentic-guardrails/contracts";
 
 import {
   currentBranch,
+  changedLinesIn,
+  diffNumstat,
   diffRefs,
   lsFiles,
   mergeBase,
+  numstatAgainstHead,
   refExists,
   refProblem,
   resolveDefaultBase,
   uncommittedFiles,
+  untrackedFiles,
   type GitResult,
 } from "../git/git.js";
+import { fsPath } from "../git/worktree.js";
 
-export type ScopeKind = "uncommitted" | "branch" | "pr" | "project";
+// Single-sourced from contracts (see `scopeKindSchema`): the manifest's scope
+// block, the trend record's `scopeKind` and this type cannot drift apart.
+export type { ScopeKind };
 
 /** What the CLI asked for, before any git resolution. */
 export interface ScopeRequest {
@@ -267,6 +276,118 @@ export function changeSetFor(scope: ResolvedScope, analyzeRoot: string): GitResu
     });
   }
   return { ok: true, value: { ...produced.value, files, deleted, degradations } };
+}
+
+/** How big this scope's change is — the OD-1 denominator (1.16). */
+export interface ScopeChangeSize {
+  /** Added + deleted lines, as git counted them. */
+  changedLines: number;
+  /** Files git could not count lines in (binary, or an unreadable untracked
+   * file). They contribute 0 lines; carried so the caller DECLARES the
+   * incompleteness instead of publishing a silently smaller denominator. */
+  binaryFiles: string[];
+  /** Exit-neutral declarations about the MEASUREMENT (not about coverage). */
+  degradations: Degradation[];
+}
+
+/**
+ * The change SIZE for a resolved scope, mirroring how {@link changeSetFor}
+ * builds the change set so the numerator and the denominator describe the
+ * same change:
+ *
+ *   `branch`/`pr`   `mergeBase..ref`, the same range the diff uses.
+ *   `uncommitted`   `diff --numstat HEAD` for tracked edits PLUS every
+ *                   untracked file counted as all-added — because that is
+ *                   exactly what the uncommitted change set contains.
+ *   `project`       nothing: `--project` is not a diff and has no denominator
+ *                   by construction. Zero here is "not measured", and the
+ *                   score is OMITTED for it rather than computed from a
+ *                   fabricated one.
+ *
+ * `_agentic-guardrails/` is excluded here too — the engine's own output must
+ * not inflate the denominator any more than it may enter the change set.
+ */
+export function changeSizeFor(
+  scope: ResolvedScope,
+  analyzeRoot: string,
+): GitResult<ScopeChangeSize> {
+  if (scope.kind === "project") {
+    return { ok: true, value: { changedLines: 0, binaryFiles: [], degradations: [] } };
+  }
+  const degradations: Degradation[] = [];
+  const declareBinary = (files: readonly string[]): void => {
+    if (files.length === 0) return;
+    const shown = files.slice(0, 3).join(", ");
+    degradations.push({
+      reason:
+        `${files.length} file(s) contribute 0 lines to changed-KLOC because git reports no line ` +
+        `counts for them (${shown}${files.length > 3 ? ", …" : ""}) — the score's denominator is that much smaller`,
+      subject: "score-change-size",
+    });
+  };
+
+  if (scope.kind === "branch" || scope.kind === "pr") {
+    const forkPoint = mergeBase(analyzeRoot, scope.base as string, scope.ref as string);
+    if (!forkPoint.ok) return forkPoint;
+    const measured = diffNumstat(analyzeRoot, forkPoint.value, scope.ref as string);
+    if (!measured.ok) return measured;
+    const binaryFiles = measured.value.binaryFiles.filter(mineForSize);
+    declareBinary(binaryFiles);
+    return {
+      ok: true,
+      value: {
+        // PATH-FILTERED, not a whole-diff total: every run appends a line to
+        // the committed `history/trends.jsonl`, so summing the diff wholesale
+        // would grow the denominator by one line per run forever and quietly
+        // raise every later score.
+        changedLines: changedLinesIn(measured.value, mineForSize),
+        binaryFiles,
+        degradations,
+      },
+    };
+  }
+
+  // uncommitted: tracked edits from the diff, untracked files as all-added.
+  const tracked = numstatAgainstHead(analyzeRoot);
+  if (!tracked.ok) return tracked;
+  const untracked = untrackedFiles(analyzeRoot);
+  if (!untracked.ok) return untracked;
+  const binaryFiles = new Set(tracked.value.binaryFiles.filter(mineForSize));
+  let changedLines = changedLinesIn(tracked.value, mineForSize);
+  for (const file of untracked.value.filter(mineForSize)) {
+    const counted = countLines(path.join(analyzeRoot, file));
+    if (counted === undefined) binaryFiles.add(file);
+    else changedLines += counted;
+  }
+  const sortedBinary = [...binaryFiles].sort();
+  declareBinary(sortedBinary);
+  return { ok: true, value: { changedLines, binaryFiles: sortedBinary, degradations } };
+}
+
+function mineForSize(file: string): boolean {
+  return !file.startsWith(EXCLUDED_PREFIX);
+}
+
+/**
+ * Lines in an untracked file, counted git's way: a trailing incomplete line
+ * still counts. Returns undefined for a file that has no line count to give —
+ * binary (a NUL byte, git's own heuristic) or unreadable — so the caller
+ * declares it rather than adding a silent 0.
+ */
+function countLines(absPath: string): number | undefined {
+  let bytes: Buffer;
+  try {
+    // `fsPath`: an untracked path under a deep worktree can cross Win32's
+    // 260-char limit, where the read would fail and look like a binary file.
+    bytes = readFileSync(fsPath(absPath));
+  } catch {
+    return undefined;
+  }
+  if (bytes.includes(0)) return undefined;
+  let lines = 0;
+  for (const byte of bytes) if (byte === 0x0a) lines += 1;
+  if (bytes.length > 0 && bytes[bytes.length - 1] !== 0x0a) lines += 1;
+  return lines;
 }
 
 function produce(scope: ResolvedScope, analyzeRoot: string): GitResult<ChangeSet> {

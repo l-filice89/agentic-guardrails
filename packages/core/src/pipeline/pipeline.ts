@@ -36,13 +36,19 @@ import {
   corpusMapFileSchema,
   degradationSchema,
   findingSchema,
+  makeTrendRecord,
   reviewArtifactSchema,
+  trendRecordSchema,
   type Boundaries,
   type Degradation,
+  type DispositionPolicy,
   type Finding,
   type PrMetadata,
   type ReviewArtifact,
+  type ReviewScores,
   type RunManifest,
+  type SeverityCounts,
+  type TrendRecord,
 } from "@agentic-guardrails/contracts";
 import pMap from "p-map";
 import { ts } from "ts-morph";
@@ -62,12 +68,13 @@ import { axiom6Conformance } from "../analyzers/axiom6-conformance.js";
 import type { ChangedFilesCache, ChangedFilesParse } from "../analyzers/changed-files.js";
 import { DeterministicCache, loadCacheSecret } from "../cache/deterministic-cache.js";
 import {
+  EFFECTIVE_DEFAULTS,
   evaluateGate,
   loadConfig,
   type GateResult,
   type LoadConfigResult,
 } from "../config/config-loader.js";
-import { fileGitStatus, headSha, repoRoot, revParse } from "../git/git.js";
+import { EMPTY_TREE_SHA, fileGitStatus, headSha, repoRoot, revParse } from "../git/git.js";
 import {
   fsPath,
   toManifestDegradation,
@@ -80,6 +87,15 @@ import {
   readStructuralSeedFile,
   type StructuralSeedRead,
 } from "../knowledge/structural-seed.js";
+import { appendJsonl, TRENDS_PATH } from "../persistence/history.js";
+import {
+  changedKlocMilliOf,
+  od1ScoreTenths,
+  OD1_FORMULA_VERSION,
+  PROJECT_SCORE_OMITTED,
+  scopeIsScorable,
+} from "../report/score.js";
+import { aggregateTrends, type TrendAggregation } from "../report/trends.js";
 import { ghPrMetadata, type GhRunner } from "./gh-metadata.js";
 import {
   ABSENT_SHA256,
@@ -89,7 +105,14 @@ import {
   RULESET_VERSION,
 } from "./manifest.js";
 import { mergeFindings } from "./merge.js";
-import { changeSetFor, resolveScope, type ResolvedScope, type ScopeRequest } from "./scope.js";
+import {
+  changeSetFor,
+  changeSizeFor,
+  resolveScope,
+  type ResolvedScope,
+  type ScopeChangeSize,
+  type ScopeRequest,
+} from "./scope.js";
 
 export type { ReviewArtifact } from "@agentic-guardrails/contracts";
 
@@ -258,7 +281,26 @@ export type ReviewRunResult =
        * `.gitignore` lines in an initialized repo — their own channel so
        * the CLI does not misattribute them to the config plane. */
       wiringWarnings: string[];
+      /** FR-15's per-axiom delta against the previous comparable run (1.16).
+       * REPORT-ONLY: it depends on prior history, so writing it into the
+       * artifact would break the byte-identity invariant three tests assert. */
+      trend: TrendAggregation;
+      /** What happened to this run's trend append — never fatal, always
+       * declared (a history plane that silently stops recording is worse
+       * than one that says it could not). */
+      trendWrite: TrendWriteOutcome;
+      /** Config-plane retention limit for `reviews/<scope>/`, so the CLI's
+       * artifact write can prune without re-reading config. */
+      artifactRetention: number;
+      /** Configured non-interactive DR-1 disposition policy. */
+      dispositionPolicy: DispositionPolicy;
     };
+
+/** What the trend append did. `skipped` is the idempotent re-run: this exact
+ * record is already in history, which is a SUCCESS. */
+export type TrendWriteOutcome =
+  | { state: "appended" | "skipped"; repaired: boolean }
+  | { state: "failed"; reason: string };
 
 export interface RunReviewOptions {
   cwd: string;
@@ -320,6 +362,9 @@ interface AnalysisOutcome {
   runDegraded: Degradation[];
   declaredOnly: Degradation[];
   cache: NonNullable<RunManifest["cache"]>;
+  /** The OD-1 denominator's measurement (1.16) — from the SAME range the
+   * change set came from, so numerator and denominator describe one change. */
+  changeSize: ScopeChangeSize;
   corpusSeedHash?: string;
   ledgerHash?: string;
   corpusHash?: string;
@@ -484,7 +529,10 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewRunRes
 
   // ---- Phase 5: composition (INVOKING repo, outside any worktree) ---------
   const runDegraded = [...outcome.runDegraded, ...worktreeDegraded];
-  const declaredOnly = [...outcome.declaredOnly, ...scopeDeclared];
+  // Change-size declarations are EXIT-NEUTRAL: a binary file or an
+  // unmeasurable range makes the score's denominator smaller, which is a
+  // statement about the score's precision, not about lost analysis coverage.
+  const declaredOnly = [...outcome.declaredOnly, ...scopeDeclared, ...outcome.changeSize.degradations];
   const bySubjectReason = (a: Degradation, b: Degradation): number =>
     compare(a.subject, b.subject) || compare(a.reason, b.reason);
   runDegraded.sort(bySubjectReason);
@@ -533,6 +581,32 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewRunRes
   );
 
   const gate = evaluateGate(outcome.findings, config, outcome.enabledAxioms);
+
+  // ---- FR-14: raw counts + change size + the DERIVED score ---------------
+  // Every input here is this run's own, so the block is a pure function of
+  // the run and the artifact stays byte-identical for identical inputs. The
+  // FR-15 delta below is deliberately NOT part of it.
+  const axiomSeverityCounts = countBySeverity(outcome.findings, outcome.enabledAxioms);
+  // The denominator is computed ONLY for a scope that has one. `--project` is
+  // not a diff, so `changedKlocMilliOf(0)` would write a 0.1-KLOC change size
+  // into the artifact for a scope the contract says has no change size by
+  // construction — a fabricated denominator, omitting the score notwithstanding.
+  const scorable = scopeIsScorable(scope.kind);
+  const changedKlocMilli = scorable
+    ? changedKlocMilliOf(outcome.changeSize.changedLines)
+    : undefined;
+  const scores: ReviewScores = {
+    formulaVersion: OD1_FORMULA_VERSION,
+    axiomSeverityCounts,
+    ...(changedKlocMilli === undefined
+      ? { scoreOmittedReason: PROJECT_SCORE_OMITTED }
+      : {
+          changedLines: outcome.changeSize.changedLines,
+          changedKlocMilli,
+          scoreTenths: od1ScoreTenths(axiomSeverityCounts, changedKlocMilli),
+        }),
+    binaryFiles: outcome.changeSize.binaryFiles.length,
+  };
 
   // Declared assembly: six phases always, membership derived from
   // scope/mode/config (off-axioms shrink phase 1), empty phases say why.
@@ -588,6 +662,7 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewRunRes
     degraded: [...sentinelDegraded, ...declaredOnly, ...runDegraded],
     manifest,
     gate,
+    scores,
   };
   // Never persist an invalid envelope: validation failure is the exit-2 path.
   const parsed = reviewArtifactSchema.safeParse(artifact);
@@ -599,6 +674,63 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewRunRes
       message: `composed review artifact failed schema validation: ${issue?.path.join(".") ?? "?"}: ${issue?.message ?? "unknown issue"}`,
     };
   }
+  // ---- The history plane (1.16) ------------------------------------------
+  // Everything below runs AFTER the artifact is composed and validated, and
+  // nothing it produces reaches the artifact: the trend record is derived
+  // from the artifact, never the other way round.
+  //
+  // The recorded commit is what was REVIEWED — the ref's commit for a ref
+  // scope (which lives in the invoking repo, so ancestry can walk it), and
+  // the invoking HEAD otherwise. Two `uncommitted` runs therefore share one
+  // sha; `recordId` is the declared tiebreak (see the contract).
+  const reviewedRef = scope.ref === undefined ? undefined : revParse(outputRoot, scope.ref);
+  const reviewedSha =
+    reviewedRef !== undefined && reviewedRef.ok ? reviewedRef.value : headSha(outputRoot);
+  const trendRecord: TrendRecord = makeTrendRecord({
+    schemaVersion: 1,
+    runId: artifact.runId,
+    commitSha: reviewedSha,
+    scopeKind: scope.kind,
+    axiomSeverityCounts,
+    ...(changedKlocMilli === undefined ? {} : { changedKlocMilli }),
+  });
+  const trendsStore = path.join(outputRoot, TRENDS_PATH);
+  // Aggregate BEFORE appending, and exclude this run's own id: a re-run must
+  // never end up comparing against itself.
+  //
+  // Ancestry is measured against the REVIEWED commit, not the invoking HEAD.
+  // `--branch`/`--pr` normally review a ref the invoker is not standing on, so
+  // asking "is the previous record's commit an ancestor of MY head?" answers
+  // no for every record on that branch — the delta would only start working
+  // once the branch was merged, i.e. after it stopped being useful. The
+  // record stores `reviewedSha`; the query has to ask about the same commit.
+  const trend = aggregateTrends({
+    repoRoot: outputRoot,
+    storePath: trendsStore,
+    headSha: reviewedSha,
+    scopeKind: scope.kind,
+    current: axiomSeverityCounts,
+    currentRecordId: trendRecord.recordId,
+  });
+  // An unborn repo has no commit to record against: `headSha` answers with the
+  // empty-TREE sentinel, which passes the schema but is not a commit, so every
+  // such record would be permanently declared "names a commit no longer in
+  // this repository" and enough of them would cold-start the whole store.
+  // Recording nothing is the honest answer, said out loud.
+  const appended =
+    reviewedSha === EMPTY_TREE_SHA
+      ? ({
+          ok: false,
+          reason: "this repository has no commits yet — there is no commit to record a trend against",
+        } as const)
+      : appendJsonl(trendsStore, trendRecordSchema, [trendRecord]);
+  const trendWrite: TrendWriteOutcome = appended.ok
+    ? {
+        state: appended.value.appended > 0 ? "appended" : "skipped",
+        repaired: appended.value.repaired,
+      }
+    : { state: "failed", reason: appended.reason };
+
   return {
     ok: true,
     repoRoot: outputRoot,
@@ -612,7 +744,35 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewRunRes
     deviations: loaded.deviations,
     configWarnings,
     wiringWarnings,
+    trend,
+    trendWrite,
+    artifactRetention: config.artifactRetention ?? EFFECTIVE_DEFAULTS.artifactRetention,
+    dispositionPolicy: config.dispositionPolicy ?? EFFECTIVE_DEFAULTS.dispositionPolicy,
   };
+}
+
+/**
+ * FR-14's raw material: per-axiom severity counts. EVERY axiom that ran gets
+ * an entry, zeros included — an axiom that found nothing this run is a real
+ * data point, and without the entry the FR-15 delta could not tell "clean" from
+ * "did not run". Axioms configured `off` are absent for exactly that reason.
+ */
+function countBySeverity(
+  findings: readonly Finding[],
+  ranAxioms: readonly string[],
+): Record<string, SeverityCounts> {
+  const counts: Record<string, SeverityCounts> = {};
+  // Sorted keys: insertion order must never reach the artifact's bytes.
+  for (const axiom of [...new Set([...ranAxioms, ...findings.map((f) => f.axiom)])].sort(
+    numericCompare,
+  )) {
+    counts[axiom] = { error: 0, warning: 0, info: 0 };
+  }
+  for (const finding of findings) {
+    const entry = counts[finding.axiom];
+    if (entry !== undefined) entry[finding.severity] += 1;
+  }
+  return counts;
 }
 
 /** True when `ref` resolves to the commit HEAD is on — the test that decides
@@ -638,6 +798,24 @@ async function analyze(inputs: AnalysisInputs): Promise<AnalysisOutcome> {
   const changed = changeSetFor(scope, analyzeRoot);
   if (!changed.ok) throw new ChangeSetError(changed.reason);
   const candidates = changed.value;
+
+  // The OD-1 denominator (1.16), measured over the same range as the change
+  // set. A measurement failure is NOT a run failure: the counts are still
+  // real, so the size degrades to "unmeasured" (which floors the denominator)
+  // with the reason declared, rather than losing the whole review.
+  const measured = changeSizeFor(scope, analyzeRoot);
+  const changeSize: ScopeChangeSize = measured.ok
+    ? measured.value
+    : {
+        changedLines: 0,
+        binaryFiles: [],
+        degradations: [
+          {
+            reason: `changed-KLOC could not be measured (${firstLine(measured.reason)}) — the score's denominator fell back to its 0.1 floor`,
+            subject: "score-change-size",
+          },
+        ],
+      };
 
   // Content hashes are computed ONCE, here, before any analyzer runs — the
   // same snapshot feeds analysis and the runId (no analyze/hash race).
@@ -1050,6 +1228,7 @@ async function analyze(inputs: AnalysisInputs): Promise<AnalysisOutcome> {
       ...cacheStats,
       ...(cacheDisabled === undefined ? {} : { disabled: cacheDisabled }),
     },
+    changeSize,
     ...(corpusSeed.ok ? { corpusSeedHash: seedHash } : {}),
     ...(ledger.hash === undefined ? {} : { ledgerHash: ledger.hash }),
     ...(corpus.hash === undefined ? {} : { corpusHash: corpus.hash }),

@@ -5,6 +5,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import os from "node:os";
@@ -14,7 +15,12 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { fsPath } from "../git/worktree.js";
-import { InvalidScopeError, writeFileAtomic, writeReviewArtifact } from "./artifact-writer.js";
+import {
+  InvalidScopeError,
+  pruneScopeDir,
+  writeFileAtomic,
+  writeReviewArtifact,
+} from "./artifact-writer.js";
 
 const tempDirs: string[] = [];
 
@@ -192,3 +198,76 @@ describe("SCOPE_PATTERN de-duplication (1.15)", () => {
 function validOptions(): { repoRoot: string; scope: string; runId: string; json: string } {
   return { repoRoot: tempDir(), scope: "uncommitted", runId: "0123456789abcdef", json: "{}\n" };
 }
+
+describe("per-run artifact retention (1.16)", () => {
+  it("prunes a scope directory to the newest N and NEVER touches history", () => {
+    const repoRoot = tempDir();
+    const dir = path.join(repoRoot, "_agentic-guardrails", "reviews", "uncommitted");
+    mkdirSync(dir, { recursive: true });
+    // Distinct mtimes so "newest" is unambiguous; the filename tiebreak is
+    // asserted separately below.
+    for (let i = 0; i < 5; i++) {
+      const file = path.join(dir, `run${i}.json`);
+      writeFileSync(file, "{}\n");
+      utimesSync(file, new Date(1_700_000_000_000 + i * 1000), new Date(1_700_000_000_000 + i * 1000));
+    }
+    // Committed history lives elsewhere and must survive untouched.
+    const history = path.join(repoRoot, "_agentic-guardrails", "history");
+    mkdirSync(history, { recursive: true });
+    writeFileSync(path.join(history, "trends.jsonl"), '{"recordId":"a"}\n');
+
+    writeReviewArtifact({ repoRoot, scope: "uncommitted", runId: "ffffffffffffffff", json: "{}\n", maxEntries: 3 });
+    const kept = readdirSync(dir).sort();
+    expect(kept).toHaveLength(3);
+    // The just-written artifact is the newest and always survives.
+    expect(kept).toContain("ffffffffffffffff.json");
+    expect(kept).toContain("run4.json");
+    expect(kept).not.toContain("run0.json");
+    expect(existsSync(path.join(history, "trends.jsonl"))).toBe(true);
+  });
+
+  it("breaks an mtime TIE by filename so pruning stays deterministic", () => {
+    const repoRoot = tempDir();
+    const dir = path.join(repoRoot, "_agentic-guardrails", "reviews", "uncommitted");
+    mkdirSync(dir, { recursive: true });
+    const stamp = new Date(1_700_000_000_000);
+    for (const name of ["a.json", "b.json", "c.json"]) {
+      const file = path.join(dir, name);
+      writeFileSync(file, "{}\n");
+      utimesSync(file, stamp, stamp);
+    }
+    pruneScopeDir(dir, 2);
+    // Same mtime everywhere → the name decides, newest-first: a, b kept.
+    expect(readdirSync(dir).sort()).toEqual(["a.json", "b.json"]);
+  });
+
+  it("omitting maxEntries prunes nothing — retention is opt-in from config", () => {
+    const repoRoot = tempDir();
+    const dir = path.join(repoRoot, "_agentic-guardrails", "reviews", "uncommitted");
+    mkdirSync(dir, { recursive: true });
+    for (let i = 0; i < 4; i++) writeFileSync(path.join(dir, `run${i}.json`), "{}\n");
+    writeReviewArtifact({ repoRoot, scope: "uncommitted", runId: "ffffffffffffffff", json: "{}\n" });
+    expect(readdirSync(dir)).toHaveLength(5);
+  });
+
+  it("an unreadable directory never fails a review that already completed", () => {
+    expect(() => pruneScopeDir(path.join(tempDir(), "nope"), 1)).not.toThrow();
+  });
+
+  it("still prunes when ONE entry vanishes between readdir and stat", () => {
+    // A concurrent run or antivirus removing a file mid-prune used to throw
+    // out of the whole loop — the prune was skipped SILENTLY while the store
+    // kept growing.
+    const dir = tempDir();
+    for (const name of ["a.json", "b.json", "c.json", "d.json"]) {
+      writeFileSync(path.join(dir, name), "{}\n");
+    }
+    pruneScopeDir(dir, 2, (file) => {
+      if (file.endsWith("c.json")) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+      return 0; // same mtime everywhere → the filename decides
+    });
+    // The vanished entry is simply not a candidate, and the prune still ran:
+    // a, b (newest by name) survive, d is pruned, c was never a candidate.
+    expect(readdirSync(dir).sort()).toEqual(["a.json", "b.json", "c.json"]);
+  });
+});

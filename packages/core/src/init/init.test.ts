@@ -85,6 +85,8 @@ describe("runInit — fresh bootstrap", () => {
       "_agentic-guardrails/config.yaml",
       "_agentic-guardrails/conventions.yaml",
       "_agentic-guardrails/corpus-map.yaml",
+      "_agentic-guardrails/history/trends.jsonl",
+      "_agentic-guardrails/history/dispositions.jsonl",
       "_agentic-guardrails/.gitattributes",
       "_agentic-guardrails/.gitignore",
     ]);
@@ -161,6 +163,8 @@ describe("runInit — never-clobber (idempotent re-run)", () => {
       "_agentic-guardrails/config.yaml",
       "_agentic-guardrails/conventions.yaml",
       "_agentic-guardrails/corpus-map.yaml",
+      "_agentic-guardrails/history/trends.jsonl",
+      "_agentic-guardrails/history/dispositions.jsonl",
       "_agentic-guardrails/.gitattributes",
       "_agentic-guardrails/.gitignore",
     ]);

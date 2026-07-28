@@ -13,13 +13,18 @@ import path from "node:path";
 
 import type { Degradation, Finding } from "@agentic-guardrails/contracts";
 import {
+  formatScoreTenths,
   runReview,
   writeReviewArtifact,
+  type AxiomDelta,
   type ReviewArtifact,
   type ScopeRequest,
+  type TrendAggregation,
 } from "@agentic-guardrails/core";
 
 import { disposeArtifact } from "./disposition.js";
+import { disposeFindings } from "./finding-disposition.js";
+import { sanitizeMessage } from "./sanitize.js";
 
 /** Explicit axiom → category labels (never inferred from a finding's ruleId
  * — an axiom with zero findings of its lead rule must still label correctly).
@@ -124,11 +129,33 @@ export async function reviewCommand(
       scope: result.artifact.scope,
       runId: result.artifact.runId,
       json: result.artifactJson,
+      // Retention (1.16): bound the per-run artifact store. Committed history
+      // is a different store and is never pruned.
+      maxEntries: result.artifactRetention,
     });
     const relativePath = path
       .relative(result.repoRoot, artifactPath)
       .replaceAll("\\", "/");
-    process.stdout.write(formatSummary(result.artifact, relativePath, result.runDegraded));
+    process.stdout.write(
+      formatSummary(result.artifact, relativePath, result.runDegraded, result.trend),
+    );
+
+    // History-plane visibility (1.16). A trend append that failed must never
+    // fail the run — the gate verdict is decided by findings — but a history
+    // plane that silently stops recording is how a longitudinal feature dies
+    // unnoticed, so it is always said out loud.
+    if (result.trendWrite.state === "failed") {
+      process.stderr.write(
+        `guardrails review: degraded: trend record not appended: ${sanitizeMessage(result.trendWrite.reason)}\n`,
+      );
+    } else if (result.trendWrite.repaired) {
+      process.stderr.write(
+        "guardrails review: trend history had a torn final record (a writer was killed mid-append) — repaired\n",
+      );
+    }
+    for (const declaration of result.trend.declarations) {
+      process.stderr.write(`guardrails review: trends: ${sanitizeMessage(declaration)}\n`);
+    }
 
     // Zero SILENT degradation, second half: an axiom that declined to run is
     // inconclusive, not clean. These never touch the exit code (that is what
@@ -145,6 +172,24 @@ export async function reviewCommand(
       }
     }
 
+    // The interactivity test is the SAME three-way guard both prompts use
+    // (flag + both TTYs): a pipe, a redirect or `--no-input` must never let
+    // either of them construct a readline interface, let alone block on one.
+    const interactive =
+      options.input !== false && process.stdin.isTTY === true && process.stdout.isTTY === true;
+
+    // DR-1 finding dispositions (1.16) — INDEPENDENT of the artifact
+    // disposition below: findings are labelled whether the artifact ends up
+    // committed or dropped, and neither prompt touches the exit code.
+    const findingDisposition = await disposeFindings({
+      repoRoot: result.repoRoot,
+      runId: result.artifact.runId,
+      findings: result.artifact.findings,
+      interactive,
+      policy: result.dispositionPolicy,
+    });
+    writeDispositionLines(findingDisposition.lines);
+
     // Commit-or-drop (1.15), AFTER the report and never affecting the exit
     // code below: a non-TTY, `--no-input`, or EOF all drop, so no pipeline or
     // CI run can be surprised by a commit.
@@ -153,16 +198,9 @@ export async function reviewCommand(
       artifactPath,
       runId: result.artifact.runId,
       scope: result.artifact.scope,
-      interactive:
-        options.input !== false && process.stdin.isTTY === true && process.stdout.isTTY === true,
+      interactive,
     });
-    for (const raw of disposition.lines) {
-      // Commit failures carry git's stderr verbatim — sanitized like every
-      // other untrusted string that reaches the terminal.
-      const line = sanitizeMessage(raw);
-      if (line.startsWith("degraded:")) process.stderr.write(`guardrails review: ${line}\n`);
-      else process.stdout.write(`${line}\n`);
-    }
+    writeDispositionLines(disposition.lines);
 
     if (result.degradedRun) return 2;
     // Exit 1 is the pipeline's gate verdict (enforcement + maxFindings), not
@@ -175,11 +213,24 @@ export async function reviewCommand(
   }
 }
 
+/** Both disposition surfaces report through `lines: string[]` rather than
+ * writing to a stream, so the routing rule (degradations to stderr, outcomes
+ * to stdout) and the sanitizer live in ONE place — a commit failure carries
+ * git's stderr verbatim, and a disposition path carries a repo path. */
+function writeDispositionLines(lines: readonly string[]): void {
+  for (const raw of lines) {
+    const line = sanitizeMessage(raw);
+    if (line.startsWith("degraded:")) process.stderr.write(`guardrails review: ${line}\n`);
+    else process.stdout.write(`${line}\n`);
+  }
+}
+
 /** Plain sequential text (UI-MOCK-GATE ruling: sketch lives in the spec). */
 export function formatSummary(
   artifact: ReviewArtifact,
   artifactRelativePath: string,
   runDegraded: readonly Degradation[],
+  trend?: TrendAggregation,
 ): string {
   const lines = [`guardrails review (${artifact.scope})`];
 
@@ -195,15 +246,56 @@ export function formatSummary(
     if (group) group.push(finding);
     else byAxiom.set(finding.axiom, [finding]);
   }
+  // FR-15: the per-axiom delta against the previous comparable run, keyed by
+  // axiom so it reads beside that axiom's current counts. REPORT-ONLY — it
+  // depends on prior history, so it is never written to the artifact.
+  const deltaByAxiom = new Map((trend?.deltas ?? []).map((d) => [d.axiom, d]));
+
   for (const axiom of [...byAxiom.keys()].sort()) {
     const group = byAxiom.get(axiom)!;
     const category = AXIOM_CATEGORY[axiom] ?? "uncategorized";
-    lines.push(`axiom ${axiom} · ${category}   ${severityCounts(group)}`);
+    const delta = deltaByAxiom.get(axiom);
+    lines.push(
+      `axiom ${axiom} · ${category}   ${severityCounts(group)}` +
+        (delta === undefined ? "" : `   ${formatDelta(delta)}`),
+    );
     for (const f of group) {
       lines.push(
         `  ${f.location.file}:${f.location.startLine}  ${f.severity}  ${sanitizeMessage(f.message)}  [${f.ruleId}]`,
       );
     }
+  }
+
+  // An axiom that STOPPED producing findings has a delta and no findings
+  // block to hang it on — and it is the interesting one. Without this it
+  // would silently vanish from the report.
+  for (const delta of trend?.deltas ?? []) {
+    if (byAxiom.has(delta.axiom)) continue;
+    const category = AXIOM_CATEGORY[delta.axiom] ?? "uncategorized";
+    lines.push(`axiom ${delta.axiom} · ${category}   no findings   ${formatDelta(delta)}`);
+  }
+
+  // FR-14: the derived OD-1 score, always beside its formula version so a
+  // future v2 number can never be mistaken for a v1 one. An omitted score
+  // says WHY rather than printing a 0 or 100 that means "undefined".
+  const scores = artifact.scores;
+  if (scores !== undefined) {
+    // `changedLines` is absent exactly when the scope has no denominator, and
+    // that branch prints the omission reason instead of this string.
+    const lineCount = scores.changedLines ?? 0;
+    const kloc = `${lineCount} changed line${lineCount === 1 ? "" : "s"}`;
+    const binary =
+      scores.binaryFiles > 0 ? `, ${scores.binaryFiles} binary file(s) uncounted` : "";
+    lines.push(
+      scores.scoreTenths === undefined
+        ? `score: n/a (${sanitizeMessage(scores.scoreOmittedReason ?? "no denominator")}) · ${scores.formulaVersion}`
+        : `score: ${formatScoreTenths(scores.scoreTenths)}/100 · ${scores.formulaVersion} · ${kloc}${binary}`,
+    );
+  }
+  if (trend?.coldStart === true) {
+    // A first run genuinely has nothing to compare against. Saying so is the
+    // difference between "no change" and "no baseline".
+    lines.push("trend: no comparable previous run — this run is the baseline");
   }
 
   lines.push(`artifact: ${artifactRelativePath}`);
@@ -215,6 +307,13 @@ export function formatSummary(
   return `${lines.join("\n")}\n`;
 }
 
+/** One axiom's movement since the previous comparable run, signed so a
+ * regression and an improvement never look the same at a glance. */
+function formatDelta(delta: AxiomDelta): string {
+  const signed = (n: number): string => (n > 0 ? `+${n}` : String(n));
+  return `Δ ${signed(delta.error)}E ${signed(delta.warning)}W ${signed(delta.info)}I`;
+}
+
 /** One degradation as a terminal line. Degradation reasons embed subprocess
  * stderr (`gh`, git) and analyzed-file paths, so a hostile `gh` on PATH — or
  * a repository with a crafted path — could otherwise write ANSI escapes
@@ -223,15 +322,9 @@ export function degradationText(degradation: { reason: string; subject: string }
   return `${sanitizeMessage(degradation.reason)} (${sanitizeMessage(degradation.subject)})`;
 }
 
-/** Untrusted text can embed analyzed-file content and subprocess stderr — C0
- * control characters (except \n and \t) are stripped so nothing can smuggle
- * terminal escape sequences into the report. Code-point filter, not a regex
- * literal, so no control character ever appears in this source file. */
-function sanitizeMessage(message: string): string {
-  return [...message]
-    .filter((c) => c === "\n" || c === "\t" || c.charCodeAt(0) >= 0x20)
-    .join("");
-}
+// `sanitizeMessage` moved to `./sanitize.js` — `trends-command.ts` and the
+// disposition prompt print equally untrusted text and must use the same rule,
+// and importing it from here would make a cycle with `finding-disposition.ts`.
 
 function severityCounts(findings: readonly Finding[]): string {
   const errors = findings.filter((f) => f.severity === "error").length;

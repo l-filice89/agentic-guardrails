@@ -294,6 +294,54 @@ uncommitted change(s) …` — and an empty ref diff (`--branch main --base main
 an already-merged branch) is declared too, so "nothing was reviewed" never
 reads as "nothing was wrong". Neither changes the exit code.
 
+### Scores, trends and dispositions
+
+Every run records **raw** per-axiom severity counts plus the change size it
+measured (`git --numstat`), and derives an OD-1 score from them —
+`100 − (10·E + 3·W + 1·I)/changed-KLOC`, floored at 0, always printed with its
+formula version (`od-1-v1`). The counts are the record; the score is a view, so
+changing the formula re-derives history instead of poisoning it. Changed-KLOC
+floors at 0.1 so tiny and deletion-only diffs stay finite (**that edge rule is
+proposed, not ratified** — the version stamp exists so it can change).
+`--project` is not a diff, so it records counts and **omits** both the score
+and the denominator, with a declared reason, rather than inventing either.
+Binary files contribute 0 lines and are declared, never silently counted as no
+change, and `_agentic-guardrails/**` — including the history plane every run
+appends to — is excluded from the denominator so the engine's own output cannot
+inflate its own score.
+
+Each run appends one record to the **committed** `_agentic-guardrails/history/
+trends.jsonl` (append-only, `merge=union`, content-addressed `recordId` so an
+identical re-run appends nothing). The aggregator dedupes on that id, orders by
+**git ancestry** — the previous record of the same scope kind whose commit is
+the nearest ancestor of the commit *this run reviewed*, so a `--branch` review
+compares against that branch's own history rather than waiting to be merged —
+validates every line before trusting it (including recomputing `recordId` as a
+content address, so a hand-written record cannot win the tiebreak), skips and
+declares a record whose commit is gone, and cold-starts rather than reporting a
+delta from a store it cannot trust. The per-axiom delta is printed
+in the **report only**: it depends on prior history, so writing it into the
+artifact would break the byte-identity-for-identical-inputs invariant.
+
+Findings can be dispositioned `actionable` / `not-actionable` / `deferred` into
+the committed `history/dispositions.jsonl`, keyed `{runId, findingId}` — the
+source DR-1's trust metrics are computed from. This is independent of the
+1.15 artifact commit-or-drop prompt, and it never affects the exit code.
+`--no-input`, a pipe or a non-TTY never blocks: the default policy records
+**nothing** rather than fabricating a label nobody chose.
+
+`guardrails trends [--open]` renders `.cache/trends.html` — a fully
+self-contained page (inlined data, vanilla JS, inline CSS, hand-drawn SVG; no
+CDN, no network, no charting dependency), with an honest empty state on a first
+run and `--open` that is never fatal (and that hands the path to a plain
+executable, never to `cmd /c start`, which would re-parse it).
+
+`reviews/<scope>/` is pruned to the newest `artifactRetention` artifacts
+(default 100). **Committed history is never pruned.**
+
+Full detail, including the declared deviations from the PRD and architecture
+wording: [`docs/scores-trends-and-dispositions.md`](docs/scores-trends-and-dispositions.md).
+
 ### Bootstrap (`guardrails init`)
 
 `guardrails init` bootstraps `_agentic-guardrails/` in a git repo: a
@@ -338,6 +386,8 @@ boundaries:                 # optional: powers the axiom-1 direction/unassigned 
       paths: [src/lib]
   allowed:
     app: [lib]              # app may import lib; undeclared pairs are violations
+artifactRetention: 100      # newest per-run artifacts kept per reviews/<scope>/ (committed history is never pruned)
+dispositionPolicy: skip     # skip | deferred — non-interactive DR-1 finding disposition
 ```
 
 Enforcement semantics: `blocking` error findings above `maxFindings` exit 1;

@@ -14,6 +14,7 @@ import { ENGINE_VERSION } from "@agentic-guardrails/core";
 
 import { initCommand } from "./init-command.js";
 import { reviewCommand, type ReviewCommandOptions } from "./review-command.js";
+import { trendsCommand, type TrendsCommandOptions } from "./trends-command.js";
 
 const program = new Command();
 program
@@ -57,6 +58,14 @@ program
   .option("--no-input", "skip the commit-or-drop prompt and leave the artifact untracked")
   .action(async (options: ReviewCommandOptions) => {
     process.exitCode = await reviewCommand(process.cwd(), options);
+  });
+
+program
+  .command("trends")
+  .description("Render the committed trend history as a self-contained HTML view")
+  .option("--open", "hand the rendered file to the platform opener (never fatal)")
+  .action(async (options: TrendsCommandOptions) => {
+    process.exitCode = await trendsCommand(process.cwd(), options);
   });
 
 try {

@@ -10,6 +10,128 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Scores, trends and dispositions (Story 1.16, FR-14/15, DR-1). Two contracts
+  that shipped in 1.2 and had never been written by anything now have a
+  producer, a store and a reader.
+  - **FR-14 — raw counts stored, score derived.** Every artifact gains an
+    optional `scores` block: raw per-axiom severity counts, the measured
+    change size, and the OD-1 v1 score
+    (`100 − (10·E + 3·W + 1·I)/changed-KLOC`, floored at 0) stamped with its
+    `formulaVersion` everywhere it is rendered or persisted, so a formula
+    change re-derives history instead of poisoning it. **Determinism is
+    structural, not hoped for:** the whole path is integer arithmetic and no
+    raw IEEE double reaches `JSON.stringify` — `changedKlocMilli` (thousandths
+    of a KLOC, which are exactly lines of change) and `scoreTenths` are the
+    persisted fields, and the decimal point is put back by string construction
+    at render time. Tests pin EXACT expected values, never approximate ones.
+    Changed-KLOC floors at 0.1 so a one-line or deletion-only diff stays
+    finite — **that edge rule is proposed, not ratified** (epics.md:705 says
+    "confirm with the OD-1 owner at story time"); the version stamp is the
+    mechanism by which it can change. `--project` is not a diff and has no
+    denominator by construction, so it records counts and OMITS the score with
+    a declared reason — never a fabricated 0 or 100 meaning "undefined".
+  - **Change-size measurement**, the primitive that did not exist: a
+    `git diff --numstat -z` helper with its OWN parser (`parseNumstatZ`) — the
+    `-z` numstat format is `<add>\t<del>\t<path>\0` with renames emitting two
+    extra path tokens, which `parseNameStatusZ` cannot read. Binary files
+    (`-`/`-`) contribute 0 lines and are counted and DECLARED, never silently
+    read as no change; a count git did not write as an integer is treated the
+    same way rather than shrinking the denominator (which would inflate the
+    score). Ref scopes measure `mergeBase..ref`; the uncommitted scope measures
+    `diff --numstat HEAD` plus untracked files counted as all-added, matching
+    how its change SET is built.
+  - **The committed history plane.** `_agentic-guardrails/history/trends.jsonl`
+    and `history/dispositions.jsonl`, seeded empty by `init` (git tracks files,
+    not directories) and covered by the `history/*.jsonl merge=union` attribute
+    wired forward in 1.8. New `persistence/history.ts`: a REAL `appendJsonl`
+    (single `write()` on an `"a"` handle + fsync, LF regardless of platform)
+    that is idempotent on `recordId` and REPAIRS a torn trailing record before
+    appending — `ensureLines` was deliberately not reused, because it dedupes
+    by line CONTENT and would silently drop a legitimately repeated record.
+    Reads are validate-before-trust: every line goes through its Zod schema and
+    an invalid or torn one is skipped and declared, never fatal. A missing file
+    is a normal first run, not a degradation.
+  - **FR-15 — the delta, report-only.** `report/trends.ts` dedupes on
+    `recordId`, orders by GIT ANCESTRY, and cold-starts rather than reporting a
+    delta it cannot trust. The delta is rendered in the REPORT and never
+    written to the artifact: it depends on prior history, and three tests
+    assert the artifact is byte-identical for identical inputs. Those three
+    assertions still pass unmodified.
+  - **Ancestry primitives.** `isAncestor` reads the EXIT STATUS of
+    `merge-base --is-ancestor`, because exit 1 there is a negative ANSWER, not
+    an error — routed through the existing `git()` wrapper it would have been
+    indistinguishable from "git is missing", and the aggregator would have
+    cold-started on a perfectly healthy repo. `commitExists` separates a
+    rebased-away or gc'd sha (skipped and declared) from a real failure.
+  - **The ordering is a PARTIAL order and says so.** Two `uncommitted`-scope
+    runs share one `commitSha`, and two ancestors of a merge commit need not be
+    ancestors of each other; `recordId` is the declared tiebreak and the
+    ambiguity is printed rather than silently resolved.
+  - **DR-1 finding dispositions** (`packages/cli/src/finding-disposition.ts`),
+    following `disposition.ts`'s shape verbatim — non-interactive
+    short-circuit BEFORE readline is constructed, `eofSafeIo`, SIGINT closing
+    the interface so Ctrl-C settles through the EOF default instead of
+    exit(130), `lines: string[]` back to the caller, and NO effect on the exit
+    code. INDEPENDENT of 1.15's artifact disposition: findings are labelled
+    whether the artifact was committed or dropped. The record id hashes the
+    ANSWER, so an identical re-answer appends nothing while a CORRECTION is
+    kept instead of silently colliding with the original. The default
+    non-interactive policy records NOTHING; `dispositionPolicy: deferred` is
+    available for teams that want CI findings in history as explicitly
+    un-triaged.
+  - **`guardrails trends [--open]`** — a fully self-contained HTML view at the
+    gitignored `.cache/trends.html`: inlined data, vanilla JS, inline CSS,
+    hand-drawn SVG, no CDN, no network, no charting dependency. Scores are
+    derived in the page from the stored raw counts. Inlined data is escaped for
+    SCRIPT context by a function distinct from the report's `sanitizeMessage`
+    (a C0 control-character filter that passes `<` and `>` straight through) —
+    a ref name or sha containing `</script>` cannot break out, and the page
+    builds every node with `textContent`, never `innerHTML`. An honest empty
+    state on a first run; `--open` prints the path first and is never fatal.
+  - **Retention.** `reviews/<scope>/` is pruned to the newest
+    `artifactRetention` (default 100, config-overridable) using
+    `deterministic-cache.ts`'s prune shape — newest-first by mtime with the
+    filename as tiebreak. **Committed history is never pruned.** DEVIATION,
+    declared: the AC and architecture.md say `manifests/` is pruned, but no
+    `manifests/` directory exists (1.4 embedded the manifest in the artifact);
+    the retention applies to the per-run store that actually exists, and
+    whether a committed `manifests/` store should exist is Epic 4's question.
+  - **Config plane** gains two optional strict-schema keys —
+    `artifactRetention` and `dispositionPolicy` — with entries in
+    `EFFECTIVE_DEFAULTS` and in `computeDeviations`, so neither becomes a
+    silent policy change (FR-31).
+  - **Adversarial-review fixes, same story.** The OD-1 denominator is now
+    summed PER PATH and filtered, so `_agentic-guardrails/**` — including the
+    history line every run appends — cannot inflate it (`parseNumstatZ` returns
+    per-file counts and there is no unfiltered total to reach for). The FR-15
+    ancestry query asks about the commit the run REVIEWED rather than the
+    invoking HEAD, so a `--branch`/`--pr` delta works before the branch is
+    merged. `appendJsonl` validates every record against its schema before
+    writing, repairs a torn tail only when the tail genuinely fails to parse
+    (a record that lost only its newline gets the newline back rather than
+    being deleted from committed history), loops on short writes, truncates in
+    place instead of through a temp-file rename, and dedupes within a batch;
+    its docstring now states what idempotency does and does not promise under
+    concurrency. Disposition answers are looked up in a `Map`, so `__proto__`
+    is an unrecognised answer rather than a schema-invalid record; disposition
+    records carry a per-key `revision` so REVERTING to a previous answer is
+    recorded and "latest wins" is true of the file. Both record schemas
+    recompute `recordId` and reject a record whose id is not its content
+    address — the aggregator's declared tiebreak was otherwise attacker-chosen
+    text in a `merge=union`'d store. `od1ScoreTenths` applies the 0.1-KLOC
+    floor itself, so a record-supplied denominator of 0 can no longer produce
+    `Infinity` (rendered `0.0`) or `NaN` (rendered as the "no score" dash).
+    `--project` omits `changedLines`/`changedKlocMilli` entirely instead of
+    persisting a floored one, and the scores block enforces its
+    score/reason exclusivity in the schema rather than in a comment. An unborn
+    repository records no trend record and says so. `guardrails trends`
+    sanitizes every untrusted line it prints, and `--open` uses a plain
+    executable (`explorer.exe` on Windows) rather than `cmd /c start`, which
+    re-parses its command line and would have executed a repository path
+    containing `&`. The cold-start ratio and the ancestry-scan cap declaration
+    both count the right sets, so neither fires on an ordinary re-run, and the
+    artifact prune survives an entry vanishing mid-prune.
+
 - Review scopes — branch, PR and project (Story 1.15, FR-25): `guardrails
   review` gains `--branch [ref]`, `--pr <id>`, `--project` (mutually
   exclusive), `--base <ref>` and `--no-input`. Bare `guardrails review` is
@@ -454,6 +576,31 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - `docs/adr/ADR-002-repo-layout.md` and `docs/adr/ADR-005-contracts-package.md`.
 
 ### Changed
+- **This repository's root `.gitignore` no longer swallows the committed
+  layer** (Story 1.16). It ignored `_agentic-guardrails/` wholesale, which made
+  the committed history plane unreachable — nothing under an ignored directory
+  can be committed, so the M1 gate would have had no data source in the one
+  repo that dogfoods the tool. Narrowed to exactly the generated layers
+  (`reviews/`, `.cache/`, `config.schema.json`) — the same three entries `init`
+  seeds into a consuming repo. Verified with `git check-ignore`: the generated
+  layers stay ignored and nothing beyond the intended committed layer is
+  exposed.
+- `trendRecord` (never written by anything before now, so this is free) gains
+  `runId` and `scopeKind`, and `changedKloc` becomes the integer
+  `changedKlocMilli`. `recordId` is restated as a content hash of the record's
+  own identifying inputs (`computeTrendRecordId`) — the architecture's
+  `{run-id, axiom, scoreKind}` definition describes one record per AXIOM per
+  run, which the shipped one-record-per-run shape cannot express; the shipped
+  shape is kept (one append per run keeps `merge=union` cheap) and `scoreKind`
+  is dropped, since the score is a derived view and there is no score *kind* to
+  record. `scopeKind` is single-sourced from `scopeKindSchema` in contracts, so
+  the manifest's scope block, the trend record and core's `ScopeKind` cannot
+  drift apart. No branch field: branch names are renamed, deleted and reused,
+  so ancestry is the honest ordering.
+- `formatSummary` gains the score line, the per-axiom delta, and an explicit
+  "this run is the baseline" line on a cold start — a first run genuinely has
+  nothing to compare against, and saying so is the difference between "no
+  change" and "no baseline".
 - The CLI's `exitOverride` is now installed BEFORE the subcommands are
   created, so they inherit it: a usage error raised by a subcommand (a
   `--pr 1 --project` conflict, a bad option) exits 2 as the documented exit

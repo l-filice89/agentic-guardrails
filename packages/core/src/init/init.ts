@@ -37,6 +37,7 @@ import {
   SEEDED_IGNORE_LINES,
   writeFileAtomic,
 } from "../persistence/artifact-writer.js";
+import { DISPOSITIONS_PATH, TRENDS_PATH } from "../persistence/history.js";
 import { numericCompare } from "../pipeline/manifest.js";
 import {
   ANALYZERLESS_KNOWN_AXIOMS,
@@ -175,6 +176,22 @@ export async function runInit(options: RunInitOptions): Promise<InitResult> {
       } else {
         writeFileAtomic(filePath, content);
         created.push(`_agentic-guardrails/${name}`);
+      }
+    }
+
+    // The COMMITTED history plane (1.16). Seeded EMPTY: git tracks files,
+    // not directories, so an empty directory would vanish from the clone and
+    // the `history/*.jsonl merge=union` attribute below would have nothing to
+    // apply to. An empty file is a valid, readable JSONL store (zero
+    // records = a first run), and never-clobber applies as everywhere else.
+    for (const relPath of [TRENDS_PATH, DISPOSITIONS_PATH]) {
+      const filePath = path.join(root.value, relPath);
+      if (existsSync(filePath)) {
+        kept.push(relPath);
+      } else {
+        mkdirSync(path.dirname(filePath), { recursive: true });
+        writeFileAtomic(filePath, "");
+        created.push(relPath);
       }
     }
 

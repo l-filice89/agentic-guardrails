@@ -112,8 +112,26 @@ export const boundariesSchema = z
 
 export type Boundaries = z.infer<typeof boundariesSchema>;
 
+/**
+ * What to do with the DR-1 per-finding disposition prompt when the run is
+ * NOT interactive (`--no-input`, a pipe, CI). `skip` — the default — records
+ * NOTHING: a disposition nobody made is fabricated data, and DR-1's trust
+ * metrics are only worth having if every label came from a human. `deferred`
+ * is for teams that want every CI finding to land in history as explicitly
+ * un-triaged rather than absent.
+ */
+export const dispositionPolicySchema = z.enum(["skip", "deferred"]);
+
+export type DispositionPolicy = z.infer<typeof dispositionPolicySchema>;
+
 export const configSchema = z.strictObject({
   boundaries: boundariesSchema.optional(),
+  /** Newest per-run review artifacts kept in each `reviews/<scope>/`
+   * directory (default 100). Committed history is NEVER pruned — this bounds
+   * only the gitignored per-run artifact store. */
+  artifactRetention: z.int().min(1).optional(),
+  /** Non-interactive DR-1 disposition handling (default `skip`). */
+  dispositionPolicy: dispositionPolicySchema.optional(),
   axioms: z
     .record(z.string(), axiomEntrySchema)
     .default({})

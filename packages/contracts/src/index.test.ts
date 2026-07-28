@@ -7,16 +7,20 @@ import {
   CONTRACTS_PACKAGE,
   axiomEnvelope,
   computeFindingId,
+  computeTrendRecordId,
   configJsonSchema,
   configSchema,
   conventionsFileSchema,
   corpusMapFileSchema,
   dispositionRecordSchema,
   findingSchema,
+  makeDispositionRecord,
+  makeTrendRecord,
   migrateArtifact,
   partialResult,
   registerArtifactKind,
   reviewArtifactSchema,
+  reviewScoresSchema,
   runManifestSchema,
   trendRecordSchema,
 } from "./index.js";
@@ -474,6 +478,41 @@ describe("configSchema", () => {
   });
 });
 
+describe("the FR-14 scores block", () => {
+  const base = {
+    formulaVersion: "od-1-v1",
+    axiomSeverityCounts: { "1": { error: 0, warning: 0, info: 0 } },
+    binaryFiles: 0,
+  };
+  const parse = (scores: Record<string, unknown>): boolean =>
+    reviewScoresSchema.safeParse(scores).success;
+
+  it("accepts a scored scope and an omitted-with-a-reason scope", () => {
+    expect(parse({ ...base, changedLines: 42, changedKlocMilli: 100, scoreTenths: 1000 })).toBe(
+      true,
+    );
+    expect(parse({ ...base, scoreOmittedReason: "no denominator" })).toBe(true);
+  });
+
+  it("ENFORCES the mutual exclusivity the comment only asserted", () => {
+    // Both, or neither, is an artifact nobody can interpret. Two plain
+    // `.optional()`s let either through.
+    expect(
+      parse({
+        ...base,
+        changedKlocMilli: 100,
+        scoreTenths: 900,
+        scoreOmittedReason: "no denominator",
+      }),
+    ).toBe(false);
+    expect(parse({ ...base, changedLines: 0, changedKlocMilli: 100 })).toBe(false);
+  });
+
+  it("refuses a score with no denominator to have been derived from", () => {
+    expect(parse({ ...base, scoreTenths: 1000 })).toBe(false);
+  });
+});
+
 describe("trend and disposition records", () => {
   it("validates the trend-record fixture and rejects negative counts", () => {
     const record = readJson("./__fixtures__/trend-record.v1.json") as Record<string, unknown>;
@@ -483,6 +522,91 @@ describe("trend and disposition records", () => {
         ...record,
         axiomSeverityCounts: { "5": { error: -1, warning: 0, info: 0 } },
       }).success,
+    ).toBe(false);
+  });
+
+  it("carries the scopeKind FR-15's delta rule needs, and rejects an unknown one", () => {
+    const record = readJson("./__fixtures__/trend-record.v1.json") as Record<string, unknown>;
+    expect(trendRecordSchema.safeParse({ ...record, scopeKind: "tag" }).success).toBe(false);
+    // The denominator is an INTEGER: a fractional KLOC would put an IEEE
+    // double back into a path built to keep the score platform-identical.
+    expect(trendRecordSchema.safeParse({ ...record, changedKlocMilli: 0.42 }).success).toBe(false);
+  });
+
+  it("computeTrendRecordId is a pure content hash — the idempotency contract", () => {
+    const identity = {
+      schemaVersion: 1,
+      runId: "0123456789abcdef",
+      commitSha: "20460ade5621625ff09fa73e4a2a5f9802e4358c",
+      scopeKind: "branch" as const,
+      axiomSeverityCounts: { "1": { error: 1, warning: 0, info: 0 } },
+      changedKlocMilli: 1_000,
+    };
+    // An omitted denominator (`--project`, which has none by construction) is
+    // a distinct identity from any integer one.
+    expect(computeTrendRecordId({ ...identity, changedKlocMilli: undefined })).not.toBe(
+      computeTrendRecordId(identity),
+    );
+    // Same inputs → same id, so a re-run appends nothing and `merge=union`
+    // cannot double-count it.
+    expect(computeTrendRecordId(identity)).toBe(computeTrendRecordId({ ...identity }));
+    // Axiom map ORDER must not change the id: analyzer completion order is
+    // nondeterministic and must never become record identity.
+    expect(
+      computeTrendRecordId({
+        ...identity,
+        axiomSeverityCounts: {
+          "5": { error: 0, warning: 1, info: 0 },
+          "1": { error: 1, warning: 0, info: 0 },
+        },
+      }),
+    ).toBe(
+      computeTrendRecordId({
+        ...identity,
+        axiomSeverityCounts: {
+          "1": { error: 1, warning: 0, info: 0 },
+          "5": { error: 0, warning: 1, info: 0 },
+        },
+      }),
+    );
+    // Any identifying input changing changes the id.
+    expect(computeTrendRecordId({ ...identity, changedKlocMilli: 1_001 })).not.toBe(
+      computeTrendRecordId(identity),
+    );
+    expect(makeTrendRecord(identity).recordId).toBe(computeTrendRecordId(identity));
+  });
+
+  it("a disposition record's id hashes the ANSWER, so a correction is never lost", () => {
+    const key = { runId: "run-1", findingId: "f".repeat(64) };
+    const base = { schemaVersion: 1, key, revision: 0 } as const;
+    const first = makeDispositionRecord({ ...base, disposition: "actionable" });
+    const same = makeDispositionRecord({ ...base, disposition: "actionable" });
+    const corrected = makeDispositionRecord({ ...base, disposition: "not-actionable" });
+    expect(same.recordId).toBe(first.recordId); // idempotent re-answer
+    // A changed answer must NOT collide with the original — an idempotent
+    // writer would skip it and the correction would silently disappear.
+    expect(corrected.recordId).not.toBe(first.recordId);
+    // …and REVERTING must not collide with the record it reverts to, or
+    // "latest wins" reports the answer the user moved away from.
+    expect(
+      makeDispositionRecord({ ...base, revision: 2, disposition: "actionable" }).recordId,
+    ).not.toBe(first.recordId);
+  });
+
+  it("rejects a record whose recordId is not its content address", () => {
+    // Both stores are committed and `merge=union`'d in from other clones, and
+    // the aggregator's declared tiebreak is "highest recordId wins" — an
+    // unverified id is attacker-chosen text.
+    const trend = readJson("./__fixtures__/trend-record.v1.json") as Record<string, unknown>;
+    expect(trendRecordSchema.safeParse({ ...trend, recordId: "f".repeat(64) }).success).toBe(
+      false,
+    );
+    const disposition = readJson("./__fixtures__/disposition-record.v1.json") as Record<
+      string,
+      unknown
+    >;
+    expect(
+      dispositionRecordSchema.safeParse({ ...disposition, recordId: "f".repeat(64) }).success,
     ).toBe(false);
   });
 

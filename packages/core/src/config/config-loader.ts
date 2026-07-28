@@ -48,9 +48,21 @@ if (!DEFAULTS_PARSE.success) {
 }
 const DEFAULT_CONFIG: Config = DEFAULTS_PARSE.data;
 
-/** Effective per-key defaults the gate applies to any unconfigured axiom.
- * Exported so the init questionnaire (1.8) sources the same defaults. */
-export const EFFECTIVE_DEFAULTS = { enforcement: "blocking", maxFindings: 0 } as const;
+/** Effective defaults: the per-axiom pair the gate applies to any
+ * unconfigured axiom, plus the two 1.16 top-level keys. Exported so the init
+ * questionnaire (1.8), the retention prune and the disposition loop all
+ * source ONE set of defaults — and so `computeDeviations` can report every
+ * one of them (FR-31 transparency regresses the moment a key it does not
+ * know about becomes configurable). */
+export const EFFECTIVE_DEFAULTS = {
+  enforcement: "blocking",
+  maxFindings: 0,
+  /** Newest per-run artifacts kept per `reviews/<scope>/` directory. */
+  artifactRetention: 100,
+  /** Non-interactive DR-1 handling: record NOTHING rather than fabricate a
+   * disposition nobody made. */
+  dispositionPolicy: "skip",
+} as const;
 
 export type LoadConfigResult =
   | {
@@ -189,6 +201,18 @@ function computeDeviations(raw: unknown, config: Config): string[] {
   if (config.boundaries !== undefined) {
     const n = config.boundaries.layers.length;
     lines.push(`boundaries: ${n} layer${n === 1 ? "" : "s"} declared (default: none)`);
+  }
+  // The 1.16 top-level keys. Restating an effective default is not a
+  // deviation (same rule as maxFindings above), but a key the deviation
+  // report does not know about is a SILENT policy change — retention decides
+  // which artifacts still exist, and the disposition policy decides whether
+  // CI writes to committed history.
+  for (const key of ["artifactRetention", "dispositionPolicy"] as const) {
+    const configured = config[key];
+    if (configured === undefined || configured === EFFECTIVE_DEFAULTS[key]) continue;
+    lines.push(
+      `${key} = ${JSON.stringify(configured)} (default: ${JSON.stringify(EFFECTIVE_DEFAULTS[key])})`,
+    );
   }
   return lines.sort(numericCompare);
 }

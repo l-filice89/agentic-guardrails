@@ -38,11 +38,15 @@ export interface GitRunOptions {
   timeoutMs?: number;
 }
 
-function git(
+/** The raw spawn, shared by the stdout-returning `git()` and the
+ * exit-status-returning `gitExitStatus()`. ONE place owns the argument array,
+ * `shell: false`, the timeout, the buffer ceiling and the non-interactive
+ * env — a second spawn site could skip any of them. */
+function spawnGit(
   cwd: string,
   args: readonly string[],
-  options: GitRunOptions = {},
-): { ok: true; value: string } | RawGitFailure {
+  options: GitRunOptions,
+): { failure: RawGitFailure } | { status: number | null; stdout: string; stderr: string } {
   const timeout = options.timeoutMs ?? GIT_TIMEOUT_MS;
   const result = spawnSync("git", args as string[], {
     cwd,
@@ -60,16 +64,57 @@ function git(
         ? `git timed out after ${timeout}ms: git ${args.join(" ")}`
         : `git spawn failed: ${result.error.message}`;
     return {
-      ok: false,
-      reason,
-      ...(spawnCode === undefined ? {} : { spawnCode }),
+      failure: {
+        ok: false,
+        reason,
+        ...(spawnCode === undefined ? {} : { spawnCode }),
+      },
     };
   }
+  return { status: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
+}
+
+function git(
+  cwd: string,
+  args: readonly string[],
+  options: GitRunOptions = {},
+): { ok: true; value: string } | RawGitFailure {
+  const spawned = spawnGit(cwd, args, options);
+  if ("failure" in spawned) return spawned.failure;
+  const result = spawned;
   if (result.status !== 0) {
     const stderr = (result.stderr ?? "").trim();
     return { ok: false, reason: stderr || `git exited with status ${result.status}` };
   }
   return { ok: true, value: result.stdout ?? "" };
+}
+
+/**
+ * Runs one git command and returns its EXIT STATUS instead of treating a
+ * non-zero one as a failure.
+ *
+ * `git merge-base --is-ancestor A B` answers with its exit code: 0 means yes,
+ * 1 means NO — a negative answer, not an error. `git()` above collapses every
+ * non-zero exit into a typed failure, so routing the ancestry query through it
+ * would make "not an ancestor" indistinguishable from "git is missing" or
+ * "that sha is gone", and the trend aggregator would cold-start on a perfectly
+ * healthy repo. Anything OTHER than the caller's expected answer codes is
+ * still a real failure carrying git's stderr.
+ */
+function gitExitStatus(
+  cwd: string,
+  args: readonly string[],
+  answerCodes: readonly number[],
+  options: GitRunOptions = {},
+): GitResult<number> {
+  const spawned = spawnGit(cwd, args, options);
+  if ("failure" in spawned) return { ok: false, reason: spawned.failure.reason };
+  const status = spawned.status;
+  if (status === null || !answerCodes.includes(status)) {
+    const stderr = spawned.stderr.trim();
+    return { ok: false, reason: stderr || `git exited with status ${status}` };
+  }
+  return { ok: true, value: status };
 }
 
 /**
@@ -312,6 +357,170 @@ export function parseNameStatusZ(output: string): RefDiff {
     else changed.add(file);
   }
   return { changed: [...changed].sort(), deleted: [...deleted].sort() };
+}
+
+// ---------------------------------------------------------------------------
+// change-SIZE measurement + ancestry (1.16) — the OD-1 denominator and the
+// FR-15 ordering primitive
+// ---------------------------------------------------------------------------
+
+/** One path's line counts, as `--numstat` measured them. */
+export interface FileChangeSize {
+  /** Repo-relative, `/`-separated — the destination path for a rename. */
+  path: string;
+  added: number;
+  deleted: number;
+}
+
+/**
+ * How big a change was, as `--numstat` measured it.
+ *
+ * PER PATH, deliberately, with no pre-summed total. Callers must exclude
+ * `_agentic-guardrails/**` from the OD-1 denominator (the engine's own output
+ * — including the history plane every run appends to — must not inflate the
+ * change size and silently raise every later score). A single `added`/
+ * `deleted` pair makes that exclusion structurally impossible, which is
+ * exactly the bug it caused; {@link changedLinesIn} is the only summing path.
+ */
+export interface ChangeSize {
+  /** Text files git counted lines in, path-sorted. */
+  files: FileChangeSize[];
+  /** Paths git reported as BINARY (`-`/`-`). They contribute 0 lines because
+   * git cannot count lines in them — carried separately so the caller can
+   * DECLARE the incompleteness instead of reporting a silent 0. */
+  binaryFiles: string[];
+}
+
+/** Added + deleted lines over the paths a caller accepts. The predicate is
+ * REQUIRED so no caller can sum an unfiltered total by accident. */
+export function changedLinesIn(
+  size: ChangeSize,
+  include: (file: string) => boolean,
+): number {
+  let total = 0;
+  for (const file of size.files) {
+    if (include(file.path)) total += file.added + file.deleted;
+  }
+  return total;
+}
+
+/**
+ * Parses `git diff --numstat -z`. The format is NOT `--name-status -z` and
+ * `parseNameStatusZ` cannot read it:
+ *
+ *   normal   `<added>\t<deleted>\t<path>\0`
+ *   rename   `<added>\t<deleted>\t\0<oldPath>\0<newPath>\0`   (extra token)
+ *   binary   `-\t-\t<path>\0`
+ *
+ * A rename's counts belong to the DESTINATION path, exactly as the
+ * name-status parser treats the destination as the path that exists at `to`.
+ * Exported as the unit-test seam for the format.
+ */
+export function parseNumstatZ(output: string): ChangeSize {
+  const files = new Map<string, FileChangeSize>();
+  const binaryFiles = new Set<string>();
+  const tokens = output.split("\0");
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    if (token === undefined || token.length === 0) continue;
+    // The counts and (for a non-rename) the path share ONE token; a rename
+    // ends the token at the second tab and spends two more tokens on paths.
+    const firstTab = token.indexOf("\t");
+    const secondTab = token.indexOf("\t", firstTab + 1);
+    if (firstTab < 0 || secondTab < 0) continue;
+    const rawAdded = token.slice(0, firstTab);
+    const rawDeleted = token.slice(firstTab + 1, secondTab);
+    let file = token.slice(secondTab + 1);
+    if (file.length === 0) {
+      // Rename/copy: `<old>` at i+1, `<new>` at i+2 — the destination wins.
+      file = tokens[i + 2] ?? tokens[i + 1] ?? "";
+      i += 2;
+    }
+    if (file.length === 0) continue;
+    if (rawAdded === "-" || rawDeleted === "-") {
+      binaryFiles.add(file);
+      continue;
+    }
+    // A count git did not write as a plain integer is not silently 0: it is
+    // skipped and the file is declared binary-like, because a mis-parsed 0
+    // would shrink the OD-1 denominator and inflate the score.
+    if (!/^\d+$/.test(rawAdded) || !/^\d+$/.test(rawDeleted)) {
+      binaryFiles.add(file);
+      continue;
+    }
+    // One path can legitimately appear twice (a combined diff, or a rename
+    // whose destination was also touched): accumulate rather than overwrite.
+    const entry = files.get(file) ?? { path: file, added: 0, deleted: 0 };
+    entry.added += Number.parseInt(rawAdded, 10);
+    entry.deleted += Number.parseInt(rawDeleted, 10);
+    files.set(file, entry);
+  }
+  return {
+    files: [...files.values()].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)),
+    binaryFiles: [...binaryFiles].sort(),
+  };
+}
+
+/** Added/deleted line counts between two commit-ishes — the ref scopes'
+ * changed-KLOC measurement (`mergeBase..ref`). */
+export function diffNumstat(cwd: string, from: string, to: string): GitResult<ChangeSize> {
+  const problem = refsProblem([from, to]);
+  if (problem !== undefined) return { ok: false, reason: problem };
+  const result = git(cwd, [...LONGPATHS, "diff", "--numstat", "-z", from, to, "--"]);
+  if (!result.ok) return { ok: false, reason: result.reason };
+  return { ok: true, value: parseNumstatZ(result.value) };
+}
+
+/** Added/deleted line counts for TRACKED working-tree changes (staged and
+ * unstaged) against HEAD — the `uncommitted` scope's measurement. Untracked
+ * files are not in this diff and are counted as all-added by the caller,
+ * matching how the uncommitted change SET is built. */
+export function numstatAgainstHead(cwd: string): GitResult<ChangeSize> {
+  const result = git(cwd, [...LONGPATHS, "diff", "--numstat", "-z", "HEAD", "--"]);
+  if (!result.ok) return { ok: false, reason: result.reason };
+  return { ok: true, value: parseNumstatZ(result.value) };
+}
+
+/** Untracked, non-ignored paths — the half of the uncommitted change set that
+ * no diff against HEAD can see. */
+export function untrackedFiles(cwd: string): GitResult<string[]> {
+  const result = git(cwd, [...LONGPATHS, "ls-files", "-z", "--others", "--exclude-standard", "--"]);
+  if (!result.ok) return { ok: false, reason: result.reason };
+  return { ok: true, value: parseZ(result.value) };
+}
+
+/**
+ * Is `ancestor` an ancestor of `descendant`? Exit 1 from
+ * `merge-base --is-ancestor` is the NEGATIVE ANSWER, so this reads the exit
+ * status rather than going through `git()` (which would report "no" as a
+ * failure). Any other status is a real typed failure.
+ */
+export function isAncestor(
+  cwd: string,
+  ancestor: string,
+  descendant: string,
+): GitResult<boolean> {
+  const problem = refsProblem([ancestor, descendant]);
+  if (problem !== undefined) return { ok: false, reason: problem };
+  const status = gitExitStatus(
+    cwd,
+    ["merge-base", "--is-ancestor", "--end-of-options", ancestor, descendant],
+    [0, 1],
+  );
+  if (!status.ok) return status;
+  return { ok: true, value: status.value === 0 };
+}
+
+/**
+ * Does `sha` name a commit that is actually IN this repository? A trend
+ * record can outlive its commit — rebased away, garbage-collected, or written
+ * by another clone and merged in through `merge=union` — and every ancestry
+ * query about a missing sha errors. Probed once here so the aggregator can
+ * skip-and-declare the record instead of cold-starting the whole store.
+ */
+export function commitExists(cwd: string, sha: string): boolean {
+  if (refProblem(sha) !== undefined) return false;
+  return git(cwd, ["cat-file", "-e", "--end-of-options", `${sha}^{commit}`]).ok;
 }
 
 /** Every tracked path in `cwd`'s work tree — the `project` scope's change

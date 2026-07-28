@@ -13,9 +13,11 @@ import {
   fsyncSync,
   mkdirSync,
   openSync,
+  readdirSync,
   readFileSync,
   renameSync,
   rmSync,
+  statSync,
   writeSync,
 } from "node:fs";
 import path from "node:path";
@@ -43,6 +45,9 @@ export interface WriteReviewArtifactOptions {
   runId: string;
   /** Canonical artifact bytes (already serialized — written verbatim). */
   json: string;
+  /** Newest per-run artifacts to keep in this scope directory after the
+   * write (config plane, 1.16). Omitted → no pruning. */
+  maxEntries?: number;
 }
 
 /** Writes atomically; returns the absolute final artifact path.
@@ -55,7 +60,59 @@ export function writeReviewArtifact(options: WriteReviewArtifactOptions): string
   ensureOutputGitignore(outRoot);
   const finalPath = path.join(dir, `${options.runId}.json`);
   writeFileAtomic(finalPath, options.json);
+  if (options.maxEntries !== undefined) pruneScopeDir(dir, options.maxEntries);
   return finalPath;
+}
+
+/**
+ * Bounds the per-run artifact store (Story 1.16's retention AC).
+ *
+ * DEVIATION, declared: the AC and architecture.md:316-317/349/672 say
+ * `manifests/` is pruned to the newest 100. There IS no `manifests/`
+ * directory — 1.4 embedded the RunManifest INSIDE the review artifact, and
+ * neither 1.4 nor 1.15 built a committed per-run store. Rather than invent
+ * one that nothing consumes, the retention is applied to the per-run store
+ * that actually exists (the gitignored `reviews/<scope>/`), which keeps the
+ * AC's real guarantee: bounded per-run state, and COMMITTED HISTORY IS NEVER
+ * PRUNED. Whether the architecture's committed `manifests/` store should
+ * exist at all is Epic 4's question (institutional memory).
+ *
+ * Same prune shape as `deterministic-cache.ts`: newest-first by mtime with
+ * the FILENAME as tiebreak, so two artifacts written in the same millisecond
+ * are still ordered deterministically. Best-effort throughout — a review that
+ * completed must never fail because an old artifact could not be deleted.
+ */
+export function pruneScopeDir(
+  dir: string,
+  maxEntries: number,
+  /** Test seam: the per-entry stat, so "an entry vanished mid-prune" can be
+   * exercised without racing a real filesystem. */
+  stat: (file: string) => number = (file) => statSync(fsPath(file)).mtimeMs,
+): void {
+  try {
+    const entries = readdirSync(fsPath(dir)).filter((name) => name.endsWith(".json"));
+    if (entries.length <= maxEntries) return;
+    entries
+      // Per-entry `try`, not one around the whole prune: an artifact that
+      // vanishes between `readdir` and `stat` (a concurrent run, antivirus)
+      // would otherwise throw out of the loop and skip the ENTIRE prune
+      // silently while the store keeps growing. A vanished entry is simply
+      // not a candidate.
+      .map((name) => {
+        try {
+          return { name, mtime: stat(path.join(dir, name)) };
+        } catch {
+          return undefined;
+        }
+      })
+      .filter((entry): entry is { name: string; mtime: number } => entry !== undefined)
+      .sort((a, b) => b.mtime - a.mtime || (a.name < b.name ? -1 : 1))
+      .slice(maxEntries)
+      .forEach((entry) => rmSync(fsPath(path.join(dir, entry.name)), { force: true }));
+  } catch {
+    // Unreadable directory or a file held open by another process: the
+    // artifact this run wrote is already safely on disk.
+  }
 }
 
 /**
