@@ -4,7 +4,7 @@ type: 'feature'
 created: '2026-07-28'
 status: 'done'
 baseline_revision: f6f92e1116bc7c49798dfa3a4ff70836d193d36d
-final_revision: ''
+final_revision: 41ea7965b1c6e3dec4ac1147db6c3d7b5295dcdc
 review_loop_iteration: 0
 followup_review_recommended: true # AUTO-FORCED: three HIGH inline findings (concurrent reviews destroying each other's live worktree; a deterministic re-run reporting a bogus failure; in-place ref scopes analyzing a dirty tree while the manifest claimed the ref) + accepted OVERSIZED flag
 context: []
