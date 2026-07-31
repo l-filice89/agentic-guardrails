@@ -10,6 +10,26 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- SPIKE-4 — noise metric and labeled fixtures gate (Story 1.17). The "<30%
+  noise" product claim gets its metric and its CI enforcement
+  (`docs/spikes/SPIKE-4-noise-metric.md`): denominator = error/warning
+  findings (info excluded from both sides); live numerator = DR-1
+  `not-actionable` dispositions (definition only — computation lands with
+  dogfood data, 1.18+); CI proxy = fixture placement over the five analyzers'
+  existing labeled fixture sets (`expected-findings.json` entries are true
+  positives, `clean/` trees the zero-noise oracle, an optional `noise/` tree
+  for known-FP exemplars). The disposition-scope question 1.16 deferred is
+  ruled **carried**: the latest disposition for a `findingId` labels every
+  reappearance, so recurring false positives keep counting. The gate
+  (`tests/integration/noise-metric.e2e.test.ts`, riding the existing
+  integration CI step) prints the per-analyzer FP/denominator/rate table
+  every run and fails at ≥30% overall (strictly — exactly 30% fails), at any
+  analyzer rising above its committed baseline
+  (`tests/__fixtures__/noise-baseline.json`, retroactively measured
+  2026-07-31: 0 FP / 23 error-warning findings across structural,
+  cleanliness, nfr, security, conformance), or at an analyzer with no
+  baseline entry. All gate decisions are integer/rational arithmetic — no
+  float, and the baseline stores counts, never a rate.
 - Scores, trends and dispositions (Story 1.16, FR-14/15, DR-1). Two contracts
   that shipped in 1.2 and had never been written by anything now have a
   producer, a store and a reader.

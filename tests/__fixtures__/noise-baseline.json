@@ -1,0 +1,7 @@
+{
+  "structural": { "falsePositives": 0, "denominator": 4 },
+  "cleanliness": { "falsePositives": 0, "denominator": 4 },
+  "nfr": { "falsePositives": 0, "denominator": 5 },
+  "security": { "falsePositives": 0, "denominator": 7 },
+  "conformance": { "falsePositives": 0, "denominator": 3 }
+}

@@ -395,6 +395,12 @@ Enforcement semantics: `blocking` error findings above `maxFindings` exit 1;
 code; `off` axioms do not run (declared in the run manifest's `axiomsOff`).
 Config content participates in the run identity hash.
 
+Noise gate: the "<30% noise" claim is measured, not asserted — CI sweeps the
+analyzers' labeled fixture sets and fails at ≥30% overall or any analyzer
+whose false-positive rate rises above its committed baseline
+(`tests/__fixtures__/noise-baseline.json`). See
+`docs/spikes/SPIKE-4-noise-metric.md` for the metric definition.
+
 More packages (`llm`, `action`, `plugin`) land as later stories need
 them. See `docs/adr/` for architecture decision records and `roadmap.md` for
 the milestone sequencing.

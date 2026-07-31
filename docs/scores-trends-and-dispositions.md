@@ -170,8 +170,9 @@ an id already in the store, so the idempotent writer skipped it and "latest
 wins" reported the answer the user had moved away from. Two findings that share
 one `findingId` in a single batch are deduped too, rather than writing the same
 line twice.
-Whether a disposition carries forward when the same `findingId` reappears in a
-later run is explicitly Story 1.17's decision.
+A disposition **carries forward**: the latest answer for a `findingId` labels
+every reappearance in later runs (ruled by Story 1.17 — rationale and the
+noise metric it feeds in `docs/spikes/SPIKE-4-noise-metric.md`).
 
 ## `guardrails trends [--open]`
 
