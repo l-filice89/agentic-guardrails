@@ -2,8 +2,9 @@
 title: 'Story 1.18: Dogfood CI Workflow'
 type: 'feature'
 created: '2026-07-31'
-status: 'in-review'
+status: 'done'
 baseline_revision: a5bde87f25235f033cffc19211687391dd49c693
+final_revision: 9004c3989480761500073eef27c8c4cf7fae8bfd
 review_loop_iteration: 0
 followup_review_recommended: true # AUTO-FORCED: one HIGH inline finding (shallow-checkout dogfood step) per FOLLOW-UP-REVIEW AUTO-FORCE ON HIGH + accepted OVERSIZED flag; plus a Block-If human-ruling cycle mid-story
 context: []
