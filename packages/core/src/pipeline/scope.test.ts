@@ -12,6 +12,8 @@ vi.setConfig({ testTimeout: 60_000 });
 
 import {
   changeSetFor,
+  changeSizeFor,
+  excludedBy,
   MAX_SLUG_BODY,
   resolveScope,
   slugForRef,
@@ -339,5 +341,115 @@ describe("changeSetFor", () => {
       notARepo,
     );
     expect(result.ok).toBe(false);
+  });
+});
+
+describe("config exclude prefixes (1.18)", () => {
+  it("matches whole segments only, tolerates a trailing slash, folds case per platform", () => {
+    const matches = excludedBy(["tests/fixtures/"]);
+    expect(matches("tests/fixtures/dirty.ts")).toBe(true);
+    expect(matches("tests/fixtures")).toBe(true); // the prefix itself
+    expect(matches("tests/fixtures2.ts")).toBe(false); // never a substring match
+    expect(matches("src/tests/fixtures/x.ts")).toBe(false); // anchored at the root
+    // Same case-folding rule as every other path compare (foldCase).
+    const caseInsensitive = process.platform === "win32" || process.platform === "darwin";
+    expect(excludedBy(["Tests/"])("tests/a.ts")).toBe(caseInsensitive);
+  });
+
+  it("applies to EVERY scope's change set, counted and DECLARED — never silent", () => {
+    const dir = scopeRepo();
+    write(dir, "fixtures/dirty.ts", "export const dirty = 1;\n");
+    const exclude = ["fixtures/", "root.ts", "on-main.ts", "feature.ts"];
+    const scopes: ResolvedScope[] = [
+      scopeOf(dir, { kind: "uncommitted" }),
+      scopeOf(dir, { kind: "project" }),
+      scopeOf(dir, { kind: "branch", ref: "feature" }),
+      scopeOf(dir, { kind: "pr", ref: "42" }),
+    ];
+    for (const scope of scopes) {
+      const changed = changeSetFor(scope, dir, exclude);
+      expect(changed.ok).toBe(true);
+      if (!changed.ok) continue;
+      expect(changed.value.files).toEqual([]);
+      const declared = changed.value.degradations.filter((d) => d.subject === "scope-exclusions");
+      expect(declared).toHaveLength(1);
+      expect(declared[0]?.reason).toContain("excluded from review by config exclude prefixes");
+      // The declaration names only prefixes that MATCHED this scope's set —
+      // every named prefix must come from the configured list.
+      const named = /prefixes \((.+)\) —/.exec(declared[0]?.reason ?? "")?.[1]?.split(", ") ?? [];
+      expect(named.length).toBeGreaterThan(0);
+      for (const prefix of named) expect(exclude).toContain(prefix);
+    }
+  });
+
+  it("declares only the prefixes that MATCHED files, capped at 3 (+N more)", () => {
+    const dir = scopeRepo();
+    for (const f of ["a/x.ts", "b/x.ts", "c/x.ts", "d/x.ts"]) {
+      write(dir, f, "export const x = 1;\n");
+    }
+    const scope = scopeOf(dir, { kind: "uncommitted" });
+    // `nothing-here/` matches no file — it must NOT be named in the
+    // declaration (it is still visible as an FR-31 deviation at run start).
+    const changed = changeSetFor(scope, dir, ["nothing-here/", "a/", "b/", "c/", "d/"]);
+    expect(changed.ok).toBe(true);
+    if (!changed.ok) return;
+    const declared = changed.value.degradations.find((d) => d.subject === "scope-exclusions");
+    expect(declared?.reason).toContain("4 file(s) excluded");
+    expect(declared?.reason).toContain("a/, b/, c/, +1 more");
+    expect(declared?.reason).not.toContain("nothing-here");
+  });
+
+  it("a prefix matching NOTHING produces no declaration at all — same change set as without it", () => {
+    const dir = scopeRepo();
+    write(dir, "loose.ts", "export const loose = 1;\n");
+    const scope = scopeOf(dir, { kind: "uncommitted" });
+    const withEntry = changeSetFor(scope, dir, ["nothing-here/"]);
+    const without = changeSetFor(scope, dir);
+    expect(withEntry).toEqual(without);
+  });
+
+  it("HAZARD (causality): the SAME change set without the entry contains the file", () => {
+    const dir = scopeRepo();
+    write(dir, "fixtures/dirty.ts", "export const dirty = 1;\n");
+    const scope = scopeOf(dir, { kind: "uncommitted" });
+    expect(filesOf(changeSetFor(scope, dir))).toEqual(["fixtures/dirty.ts"]);
+    const excluded = changeSetFor(scope, dir, ["fixtures/"]);
+    expect(filesOf(excluded)).toEqual([]);
+    if (excluded.ok) {
+      expect(excluded.value.degradations.map((d) => d.subject)).toContain("scope-exclusions");
+    }
+  });
+
+  it("excludes the same prefixes from the changed-KLOC denominator (uncommitted)", () => {
+    const dir = scopeRepo();
+    write(dir, "keep.ts", "export const keep = 1;\nexport const also = 2;\n"); // 2 lines
+    write(dir, "fixtures/dirty.ts", "a\nb\nc\nd\ne\n"); // 5 lines
+    const scope = scopeOf(dir, { kind: "uncommitted" });
+    const all = changeSizeFor(scope, dir);
+    expect(all.ok && all.value.changedLines).toBe(7);
+    const sized = changeSizeFor(scope, dir, ["fixtures/"]);
+    expect(sized.ok && sized.value.changedLines).toBe(2);
+  });
+
+  it("excludes the denominator on the ref-diffing side too (branch)", () => {
+    const dir = scopeRepo();
+    const scope = scopeOf(dir, { kind: "branch", ref: "feature" });
+    const all = changeSizeFor(scope, dir);
+    expect(all.ok && all.value.changedLines).toBeGreaterThan(0);
+    const sized = changeSizeFor(scope, dir, ["feature.ts"]);
+    expect(sized.ok && sized.value.changedLines).toBe(0);
+  });
+
+  it("exclude-everything on a ref diff lands on the normal empty-change-set path, declared", () => {
+    const dir = scopeRepo();
+    const changed = changeSetFor(scopeOf(dir, { kind: "branch", ref: "feature" }), dir, [
+      "feature.ts",
+    ]);
+    expect(changed.ok).toBe(true);
+    if (!changed.ok) return;
+    expect(changed.value.files).toEqual([]);
+    const subjects = changed.value.degradations.map((d) => d.subject);
+    expect(subjects).toContain("scope-exclusions");
+    expect(subjects).toContain("scope-change-set"); // the empty-diff declaration
   });
 });

@@ -17,6 +17,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Full history: the dogfood review diffs via `git merge-base` —
+          # the default depth-1 checkout has no ancestry, so merge-base
+          # would fail (or graft wrong) on every PR.
+          fetch-depth: 0
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -41,6 +46,45 @@ jobs:
 
       - name: Build
         run: pnpm -r build
+
+      # Story 1.18 dogfood (M1 gate): review this PR's own diff with the tool
+      # itself — direct CLI invocation, deterministic-only, no packaged
+      # Action. Blocking findings fail the check via the CLI's own nonzero
+      # exit; NFR-1's <60s envelope is asserted in-step. The base ref lives
+      # in the checked-out BASE repository (fork PRs included — `origin` is
+      # always the base repo here), so an unfetchable base is a loud, named
+      # failure, never a silent skip.
+      - name: Dogfood review (PR diff)
+        if: github.event_name == 'pull_request'
+        run: |
+          if ! git fetch origin "$GITHUB_BASE_REF"; then
+            echo "dogfood review: failed to fetch base ref origin/$GITHUB_BASE_REF from the base repository" >&2
+            exit 1
+          fi
+          SECONDS=0
+          status=0
+          node packages/cli/dist/index.js review --branch HEAD --base "origin/$GITHUB_BASE_REF" --no-input || status=$?
+          duration=$SECONDS
+          echo "dogfood review wall-clock: ${duration}s"
+          if [ "$status" -ne 0 ]; then
+            exit "$status"
+          fi
+          if [ "$duration" -ge 60 ]; then
+            echo "dogfood review took ${duration}s — NFR-1 requires <60s" >&2
+            exit 1
+          fi
+
+      # Upload-not-commit is the configured policy: `--no-input` disposition
+      # is `drop`, which leaves the run artifact untracked on disk. Uploaded
+      # even when the review failed — a failing review's artifact is the one
+      # you want to read.
+      - name: Upload dogfood review artifact
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dogfood-review
+          path: _agentic-guardrails/reviews/
+          if-no-files-found: ignore
 
       - name: Test (per-package, AC-1 oracle)
         run: pnpm -r test

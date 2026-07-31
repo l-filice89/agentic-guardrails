@@ -41,6 +41,7 @@ import type { ImportGraphBuildResult, UnresolvedImport } from "../adapter/langua
 import { TypeScriptAdapter } from "../adapter/typescript-adapter.js";
 import { ImportGraph } from "../graph/import-graph.js";
 import type { Analyzer, AnalyzerContext, AnalyzerResult } from "../pipeline/pipeline.js";
+import { foldCase } from "../util/fold-case.js";
 
 const AXIOM = "1";
 const RULE_CIRCULAR = "structural/circular-import";
@@ -48,13 +49,8 @@ const RULE_UNRESOLVED = "structural/unresolved-import";
 const RULE_DIRECTION = "structural/dependency-direction";
 const RULE_UNASSIGNED = "structural/unassigned-file";
 
-/** Case-insensitive filesystems (win32/darwin): git paths and graph paths
- * may disagree in case for the same file — fold before membership compares.
- * Exported for the axiom-3 analyzer (same convention, one implementation). */
-const CASE_INSENSITIVE = process.platform === "win32" || process.platform === "darwin";
-export function foldCase(p: string): string {
-  return CASE_INSENSITIVE ? p.toLowerCase() : p;
-}
+// `foldCase` moved to `../util/fold-case.js` (1.18) — a generic path-case
+// utility every path compare shares, not analyzer logic.
 
 /**
  * Merges per-tsconfig graph results: union of nodes/edges (the ImportGraph

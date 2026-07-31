@@ -48,7 +48,8 @@ import { Node, SyntaxKind, type SourceFile, type Statement } from "ts-morph";
 
 import { TypeScriptAdapter } from "../adapter/typescript-adapter.js";
 import type { Analyzer, AnalyzerContext, AnalyzerResult } from "../pipeline/pipeline.js";
-import { foldCase, mergeGraphResults } from "./axiom1-structural.js";
+import { mergeGraphResults } from "./axiom1-structural.js";
+import { foldCase } from "../util/fold-case.js";
 import { compare, firstLine, parseChangedFiles } from "./changed-files.js";
 
 const AXIOM = "3";

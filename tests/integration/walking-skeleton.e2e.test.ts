@@ -33,7 +33,7 @@ import {
   runManifestSchema,
 } from "@agentic-guardrails/contracts";
 
-import { normalizeCacheTruth } from "../../packages/core/src/pipeline/normalize-cache-truth.js";
+import { normalizeCacheTruth } from "@agentic-guardrails/core";
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const cliPath = path.join(repoRoot, "packages", "cli", "dist", "index.js");

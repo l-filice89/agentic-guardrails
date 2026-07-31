@@ -150,6 +150,57 @@ describe("loadConfig", () => {
     expect(result.deviations).toEqual(["boundaries: 2 layers declared (default: none)"]);
   });
 
+  it("reports a declared exclude key as ONE deviation line naming the prefixes (1.18)", () => {
+    const repo = tempRepo();
+    writeConfig(repo, "exclude:\n  - tests/__fixtures__/\n  - tests/fixtures/\n");
+    const result = loadConfig(repo);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.deviations).toEqual([
+      "exclude: 2 path prefixes declared (tests/__fixtures__/, tests/fixtures/) (default: none)",
+    ]);
+  });
+
+  it("caps the exclude deviation line at 3 prefixes (+N more) — never an unbounded list", () => {
+    const repo = tempRepo();
+    writeConfig(repo, "exclude:\n  - a/\n  - b/\n  - c/\n  - d/\n  - e/\n");
+    const result = loadConfig(repo);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.deviations).toEqual([
+      "exclude: 5 path prefixes declared (a/, b/, c/, +2 more) (default: none)",
+    ]);
+  });
+
+  it("an EMPTY exclude list excludes nothing and is not a deviation", () => {
+    const repo = tempRepo();
+    writeConfig(repo, "exclude: []\n");
+    const result = loadConfig(repo);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.deviations).toEqual([]);
+  });
+
+  it("rejects backslash / absolute / non-array exclude entries with clear messages (1.18)", () => {
+    const repo = tempRepo();
+    writeConfig(repo, 'exclude:\n  - "tests\\\\fixtures"\n');
+    let result = loadConfig(repo);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.message).toContain("never backslashes");
+    writeConfig(repo, "exclude:\n  - /abs/path\n");
+    result = loadConfig(repo);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.message).toContain("absolute paths are not allowed");
+    writeConfig(repo, "exclude:\n  - C:/abs/path\n");
+    result = loadConfig(repo);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.message).toContain("absolute paths are not allowed");
+    writeConfig(repo, "exclude: tests/fixtures/\n");
+    result = loadConfig(repo);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.message).toContain("exclude");
+  });
+
   it("reports axiom 5 overridden away from its blocking default", () => {
     const repo = tempRepo();
     writeConfig(repo, "axioms:\n  '5':\n    enforcement: advisory\n");

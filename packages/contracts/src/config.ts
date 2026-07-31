@@ -124,8 +124,55 @@ export const dispositionPolicySchema = z.enum(["skip", "deferred"]);
 
 export type DispositionPolicy = z.infer<typeof dispositionPolicySchema>;
 
+/**
+ * Review-scope exclusions (Story 1.18): posix repo-relative path PREFIXES
+ * removed from every scope's change set AND the changed-KLOC denominator.
+ * Prefixes, not globs — deliberately (ADR-006). Excluded files are counted
+ * and declared per run, never silently dropped. A trailing "/" is allowed
+ * (it reads naturally for a directory); matching is whole-segment either way.
+ */
+const excludeSchema = z
+  .array(z.string())
+  .describe(
+    "Repo-relative posix path prefixes excluded from review (no globs); excluded files are counted and declared per run.",
+  )
+  .superRefine((entries, ctx) => {
+    entries.forEach((p, index) => {
+      const issue = (message: string): void => {
+        ctx.addIssue({ code: "custom", path: [index], message });
+      };
+      if (p.trim() === "") issue("exclude prefix must not be blank");
+      else if (p !== p.trim())
+        issue("exclude prefixes must not have leading or trailing whitespace");
+      // Control characters (a newline especially) would let a config entry
+      // forge `guardrails review:` stderr/degradation lines when the prefix
+      // is interpolated into declarations — the hostile-text class 1.16
+      // sanitizes everywhere else.
+      else if ([...p].some((ch) => ch.charCodeAt(0) < 0x20 || ch.charCodeAt(0) === 0x7f))
+        issue("exclude prefixes must not contain control characters");
+      else if (/[*?[\]]/.test(p))
+        issue("exclude prefixes are literal — glob characters (* ? [ ]) are not supported");
+      else if (p.includes("\\"))
+        issue('exclude prefixes use forward slashes ("/"), never backslashes');
+      else if (p.startsWith("./"))
+        issue('exclude prefixes are repo-relative — drop the leading "./"');
+      // `[A-Za-z]:` alone would also reject legit posix names like
+      // `a:notes/x.ts` — only a drive-letter FOLLOWED by a separator (or
+      // nothing) is an absolute path.
+      else if (p.startsWith("/") || /^[A-Za-z]:($|[\\/])/.test(p))
+        issue("exclude prefixes are repo-relative — absolute paths are not allowed");
+      else if (p.includes("//"))
+        issue('exclude prefixes must not contain empty path segments ("//")');
+      else if (p.split("/").some((segment) => segment === "." || segment === ".."))
+        issue('exclude prefixes must not contain "." or ".." path segments');
+    });
+  });
+
 export const configSchema = z.strictObject({
   boundaries: boundariesSchema.optional(),
+  /** Repo-relative posix path prefixes excluded from every review scope
+   * (change set and changed-KLOC denominator). Default: none. */
+  exclude: excludeSchema.optional(),
   /** Newest per-run review artifacts kept in each `reviews/<scope>/`
    * directory (default 100). Committed history is NEVER pruned — this bounds
    * only the gitignored per-run artifact store. */

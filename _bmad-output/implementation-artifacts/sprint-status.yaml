@@ -61,7 +61,7 @@ development_status:
   1-15-review-scopes-branch-pr-and-project: done
   1-16-scores-trends-and-dispositions: done
   1-17-spike-4-noise-metric-and-labeled-fixtures-gate: review
-  1-18-dogfood-ci-workflow: backlog
+  1-18-dogfood-ci-workflow: review
   1-19-spike-1-structured-output-prototype-m1-signal: backlog
   epic-1-retrospective: optional
 

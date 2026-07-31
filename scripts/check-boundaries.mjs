@@ -59,8 +59,10 @@ export const LLM_SDK_SCOPE_PREFIXES = ["@ai-sdk/", "@langchain/", "@openrouter/"
  * contracts → core → {llm, cli} → {action, plugin}).
  */
 export const ALLOWED_WORKSPACE_DEPS = {
-  // Root is tooling (e2e tests import the contracts schemas), not a shipped package.
-  "(root)": ["@agentic-guardrails/contracts"],
+  // Root is tooling (e2e tests import the contracts schemas and, since 1.18's
+  // tests/tsconfig.json coverage fix, the core package surface), not a
+  // shipped package. Core's own LLM-free wall is unaffected.
+  "(root)": ["@agentic-guardrails/contracts", "@agentic-guardrails/core"],
   contracts: [],
   core: ["@agentic-guardrails/contracts"],
   cli: ["@agentic-guardrails/contracts", "@agentic-guardrails/core"],

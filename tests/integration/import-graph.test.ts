@@ -13,7 +13,7 @@ import {
   importGraphResultSchema,
   type ImportGraph,
   type PartialResultOf,
-} from "../../packages/core/src/index.js";
+} from "@agentic-guardrails/core";
 
 const fixtureDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),

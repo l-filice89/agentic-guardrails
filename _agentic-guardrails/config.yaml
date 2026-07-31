@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=./config.schema.json
+axioms: {}
+# Story 1.18 dogfood: the repo's own analyzer fixtures are deliberately
+# dirty (fake credentials, planted cycles) — excluded from every review
+# scope, counted and declared per run. Axiom enforcement stays at defaults.
+exclude:
+  - tests/__fixtures__/
+  - tests/fixtures/
+  # Block-If ruling (2026-07-31): one generated-artifacts tree plus two
+  # exact test-file paths carrying fake credentials used as inline test
+  # fixtures. New fakes in new files re-trip the gate deliberately.
+  - _bmad-output/
+  - packages/core/src/analyzers/axiom5-security.test.ts
+  - packages/core/src/pipeline/pipeline.test.ts

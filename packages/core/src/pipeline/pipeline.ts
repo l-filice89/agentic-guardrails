@@ -450,6 +450,7 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewRunRes
     const dirty = changeSetFor(
       { kind: "uncommitted", slug: "uncommitted", degradations: [] },
       outputRoot,
+      config.exclude ?? [],
     );
     if (dirty.ok && dirty.value.files.length > 0) {
       const shown = dirty.value.files.slice(0, 3).join(", ");
@@ -794,8 +795,9 @@ async function analyze(inputs: AnalysisInputs): Promise<AnalysisOutcome> {
 
   // The `_agentic-guardrails/` exclusion lives inside the resolver, once, for
   // all four producers (a written artifact must not change the next run's
-  // identity).
-  const changed = changeSetFor(scope, analyzeRoot);
+  // identity). The config `exclude` prefixes (1.18) apply at the same site —
+  // excluded files are counted and declared, never silently dropped.
+  const changed = changeSetFor(scope, analyzeRoot, config.exclude ?? []);
   if (!changed.ok) throw new ChangeSetError(changed.reason);
   const candidates = changed.value;
 
@@ -803,7 +805,7 @@ async function analyze(inputs: AnalysisInputs): Promise<AnalysisOutcome> {
   // set. A measurement failure is NOT a run failure: the counts are still
   // real, so the size degrades to "unmeasured" (which floors the denominator)
   // with the reason declared, rather than losing the whole review.
-  const measured = changeSizeFor(scope, analyzeRoot);
+  const measured = changeSizeFor(scope, analyzeRoot, config.exclude ?? []);
   const changeSize: ScopeChangeSize = measured.ok
     ? measured.value
     : {

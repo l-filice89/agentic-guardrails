@@ -202,6 +202,20 @@ function computeDeviations(raw: unknown, config: Config): string[] {
     const n = config.boundaries.layers.length;
     lines.push(`boundaries: ${n} layer${n === 1 ? "" : "s"} declared (default: none)`);
   }
+  // A declared `exclude` always deviates (the default is no exclusions) —
+  // same rule as `boundaries`: removing files from every review scope must
+  // be visible at run start (FR-31). An explicit empty list excludes nothing
+  // and is not a deviation.
+  if (config.exclude !== undefined && config.exclude.length > 0) {
+    const n = config.exclude.length;
+    // Capped like the per-run exclusion declaration (declareBinary
+    // precedent): count + first 3, never the whole unbounded list.
+    const shown = config.exclude.slice(0, 3).join(", ");
+    const more = n > 3 ? `, +${n - 3} more` : "";
+    lines.push(
+      `exclude: ${n} path prefix${n === 1 ? "" : "es"} declared (${shown}${more}) (default: none)`,
+    );
+  }
   // The 1.16 top-level keys. Restating an effective default is not a
   // deviation (same rule as maxFindings above), but a key the deviation
   // report does not know about is a SILENT policy change — retention decides

@@ -10,6 +10,36 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Dogfood CI workflow and review exclusions (Story 1.18). The M1 gate gets
+  its mechanism: a PR-only CI step runs `guardrails review` on the PR diff
+  via direct CLI invocation (`--no-input`, deterministic-only), failing the
+  check on blocking findings, asserting the <60s NFR-1 envelope in-step
+  (measured wall-clock printed every run), and uploading
+  `_agentic-guardrails/reviews/` as a workflow artifact on `always()` —
+  upload-without-committing is the configured policy (`--no-input`
+  disposition is `drop`). New optional `exclude: string[]` config key
+  (posix repo-relative path prefixes, no globs — ADR-006): applied where
+  the change set is built for ALL four scopes and to the changed-KLOC
+  denominator; excluded files are counted and declared per run (manifest
+  `scope-exclusions` degradation + `excluded:` report line + FR-31
+  deviation line), never silent; invalid entries (absolute, backslash,
+  glob, blank, non-array) are typed config errors naming the index. The
+  repo's own committed `_agentic-guardrails/` layer is bootstrapped via
+  `guardrails init` with the dirty fixture trees excluded plus three
+  narrow exact-path excludes for inline fake-credential test fixtures
+  (Block-If human ruling — no allowlist mechanism, new fakes re-trip the
+  gate). `tests/tsconfig.json` closes the 1.4-era coverage gap
+  (integration tests, `vitest.config.ts`, `tsup.config.ts` now belong to a
+  tsconfig project; `normalizeCacheTruth` joined the core package surface),
+  so dogfood runs exit 0 with zero degradations. Five deferred-work
+  entries naming 1.18 carry recorded dispositions (`docs/dogfood-ci.md` +
+  the ledger); the determinism required check remains the existing
+  byte-identity integration suites — no second harness. Root
+  devDependencies gain `@agentic-guardrails/core` (the tests project now
+  imports the core package surface) and `@types/node@^26` — pinned to what
+  the contracts package already resolves, since the new tests project's
+  `types: ["node"]` resolves the root install (typecheck verified green on
+  26).
 - SPIKE-4 — noise metric and labeled fixtures gate (Story 1.17). The "<30%
   noise" product claim gets its metric and its CI enforcement
   (`docs/spikes/SPIKE-4-noise-metric.md`): denominator = error/warning

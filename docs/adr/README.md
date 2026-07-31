@@ -10,6 +10,7 @@ established by ADR-002 and ADR-005 (Story 1.1), the first ADRs in this project.
 | [ADR-003](./ADR-003-orchestration.md) | Orchestration (static six-phase pipeline + p-map) | Accepted | Story 1.7 |
 | [ADR-004](./ADR-004-ast-tooling.md) | AST tooling (ts-morph LanguageAdapter) | Accepted | Story 1.3 |
 | [ADR-005](./ADR-005-contracts-package.md) | Contracts package (standalone pure-Zod source of truth) | Accepted | Story 1.1 |
+| [ADR-006](./ADR-006-review-exclusions.md) | Review-scope exclusions (config path prefixes, declared never silent) | Accepted | Story 1.18 |
 
 ADRs are written by the stories that realize the decisions they record, not
 up front. See

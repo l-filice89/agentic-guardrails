@@ -345,6 +345,40 @@ describe("configSchema", () => {
     expect(configJsonSchema).toMatchObject({ type: "object" });
   });
 
+  it("accepts posix exclude prefixes, trailing slash included (1.18)", () => {
+    const parsed = configSchema.safeParse({
+      // `a:notes/x.ts` is a legit posix name — a drive letter is only
+      // absolute when FOLLOWED by a separator (or nothing).
+      exclude: ["tests/__fixtures__/", "tests/fixtures", "docs/generated/", "a:notes/x.ts"],
+    });
+    expect(parsed.success).toBe(true);
+    expect(parsed.data?.exclude).toHaveLength(4);
+  });
+
+  it("rejects absolute, backslash, glob, blank, whitespace, control-char and dot-segment exclude entries with the index named", () => {
+    for (const [entry, message] of [
+      ["/abs/path", "absolute"],
+      ["C:/abs/path", "absolute"],
+      ["C:", "absolute"],
+      ["tests\\fixtures", "backslashes"],
+      ["tests/*", "glob"],
+      ["  ", "blank"],
+      [" tests/fixtures", "whitespace"],
+      ["tests/fixtures ", "whitespace"],
+      ["tests/\nfixtures", "control characters"], // a newline can forge stderr lines
+      ["tests//fixtures", "empty path segments"],
+      ["tests/./fixtures", '"." or ".." path segments'],
+      ["tests/../secrets", '"." or ".." path segments'],
+      ["./tests/fixtures", 'leading "./"'],
+    ] as const) {
+      const parsed = configSchema.safeParse({ exclude: [entry] });
+      expect(parsed.success).toBe(false);
+      expect(parsed.error?.issues[0]?.path).toEqual(["exclude", 0]);
+      expect(parsed.error?.issues[0]?.message).toContain(message);
+    }
+    expect(configSchema.safeParse({ exclude: "tests/fixtures/" }).success).toBe(false);
+  });
+
   it("accepts an optional maxFindings threshold (int >= 0)", () => {
     const parsed = configSchema.safeParse({
       axioms: { "1": { enforcement: "blocking", maxFindings: 5 } },

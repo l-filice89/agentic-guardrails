@@ -68,7 +68,8 @@ import {
 import { TypeScriptAdapter } from "../adapter/typescript-adapter.js";
 import { readStructuralSeedFile } from "../knowledge/structural-seed.js";
 import type { Analyzer, AnalyzerContext, AnalyzerResult } from "../pipeline/pipeline.js";
-import { foldCase, mergeGraphResults } from "./axiom1-structural.js";
+import { mergeGraphResults } from "./axiom1-structural.js";
+import { foldCase } from "../util/fold-case.js";
 import { compare } from "./changed-files.js";
 
 const AXIOM = "6";

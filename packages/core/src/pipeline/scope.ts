@@ -18,6 +18,7 @@ import path from "node:path";
 
 import { SCOPE_PATTERN, type Degradation, type ScopeKind } from "@agentic-guardrails/contracts";
 
+import { foldCase } from "../util/fold-case.js";
 import {
   currentBranch,
   changedLinesIn,
@@ -252,19 +253,77 @@ export interface ChangeSet {
 }
 
 /**
+ * Membership test for the config `exclude` prefixes (Story 1.18): posix
+ * repo-relative prefixes, whole-segment (an entry `tests/fixtures` never
+ * matches `tests/fixtures2.ts`), trailing "/" tolerated, case folded with the
+ * SAME rule every other path compare uses (git paths and configured prefixes
+ * may disagree in case for one directory on win32/darwin).
+ */
+export function excludedBy(exclude: readonly string[]): (file: string) => boolean {
+  const prefixes = exclude.map((p) => foldCase(p.replace(/\/+$/, "")));
+  return (file: string): boolean => {
+    const folded = foldCase(file);
+    return prefixes.some((p) => folded === p || folded.startsWith(`${p}/`));
+  };
+}
+
+/**
  * The change set for a resolved scope. `analyzeRoot` is where the files are —
  * the worktree for a ref that is not HEAD, the invoking repo otherwise.
  *
  * The `_agentic-guardrails/` exclusion lives HERE, once, downstream of all
- * four producers: every scope gets it, and no producer can forget it.
+ * four producers: every scope gets it, and no producer can forget it. The
+ * config `exclude` prefixes apply at the same site for the same reason —
+ * every scope, and NEVER silent: excluded files are counted and declared.
  */
-export function changeSetFor(scope: ResolvedScope, analyzeRoot: string): GitResult<ChangeSet> {
+export function changeSetFor(
+  scope: ResolvedScope,
+  analyzeRoot: string,
+  exclude: readonly string[] = [],
+): GitResult<ChangeSet> {
   const produced = produce(scope, analyzeRoot);
   if (!produced.ok) return produced;
   const mine = (file: string): boolean => !file.startsWith(EXCLUDED_PREFIX);
-  const files = produced.value.files.filter(mine);
-  const deleted = produced.value.deleted.filter(mine);
+  // Per-prefix matchers so the declaration can name the prefixes that
+  // ACTUALLY matched files this run — interpolating the whole configured
+  // list would bloat the line and name prefixes that did nothing.
+  const matchers = exclude.map((raw) => ({ raw, matches: excludedBy([raw]) }));
+  const matched = new Set<string>();
+  const isExcluded = (file: string): boolean => {
+    let hit = false;
+    for (const m of matchers) {
+      if (m.matches(file)) {
+        matched.add(m.raw);
+        hit = true;
+      }
+    }
+    return hit;
+  };
+  const candidateFiles = produced.value.files.filter(mine);
+  const candidateDeleted = produced.value.deleted.filter(mine);
+  const files = candidateFiles.filter((f) => !isExcluded(f));
+  const deleted = candidateDeleted.filter((f) => !isExcluded(f));
   const degradations: Degradation[] = [];
+  // Config-driven exclusion is DECLARED, never silent: the count and the
+  // matching prefixes ride the exit-neutral channel (the run lost nothing —
+  // the config says these files are not part of the reviewed change). The
+  // count is taken HERE and covers the KLOC side too: `changeSizeFor`
+  // measures the same diff range with the same predicate, so a file it
+  // excludes is a file this change set excluded.
+  const excludedCount =
+    candidateFiles.length - files.length + (candidateDeleted.length - deleted.length);
+  if (excludedCount > 0) {
+    // Config order, so the same config always declares in the same shape.
+    const names = exclude.filter((p) => matched.has(p));
+    const shown = names.slice(0, 3).join(", ");
+    const more = names.length > 3 ? `, +${names.length - 3} more` : "";
+    degradations.push({
+      reason:
+        `${excludedCount} file(s) excluded from review by config exclude prefixes ` +
+        `(${shown}${more}) — excluded files are not analyzed and not counted in changed-KLOC`,
+      subject: "scope-exclusions",
+    });
+  }
   // An empty ref diff (`--branch main --base main`, an already-merged branch)
   // produces zero files and exit 0 — byte-indistinguishable from a real clean
   // review of real changes. Declared so "nothing was reviewed" cannot read as
@@ -305,15 +364,21 @@ export interface ScopeChangeSize {
  *                   fabricated one.
  *
  * `_agentic-guardrails/` is excluded here too — the engine's own output must
- * not inflate the denominator any more than it may enter the change set.
+ * not inflate the denominator any more than it may enter the change set. The
+ * config `exclude` prefixes apply identically (an excluded file is not part
+ * of the reviewed change, either side of the ratio).
  */
 export function changeSizeFor(
   scope: ResolvedScope,
   analyzeRoot: string,
+  exclude: readonly string[] = [],
 ): GitResult<ScopeChangeSize> {
   if (scope.kind === "project") {
     return { ok: true, value: { changedLines: 0, binaryFiles: [], degradations: [] } };
   }
+  const isExcluded = excludedBy(exclude);
+  const mineForSize = (file: string): boolean =>
+    !file.startsWith(EXCLUDED_PREFIX) && !isExcluded(file);
   const degradations: Degradation[] = [];
   const declareBinary = (files: readonly string[]): void => {
     if (files.length === 0) return;
@@ -362,10 +427,6 @@ export function changeSizeFor(
   const sortedBinary = [...binaryFiles].sort();
   declareBinary(sortedBinary);
   return { ok: true, value: { changedLines, binaryFiles: sortedBinary, degradations } };
-}
-
-function mineForSize(file: string): boolean {
-  return !file.startsWith(EXCLUDED_PREFIX);
 }
 
 /**

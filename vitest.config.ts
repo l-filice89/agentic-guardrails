@@ -29,8 +29,10 @@ export default defineConfig({
       {
         test: {
           name: "integration",
+          // ponytail: `passWithNoTests` removed — the project has tests, and
+          // the key is not in vitest 4's typed ProjectConfig (now that this
+          // file is tsc-checked via tests/tsconfig.json).
           include: ["tests/integration/**/*.test.ts"],
-          passWithNoTests: true,
           // No project-wide timeout override: the spawn-heavy e2e suites set
           // their own per-file budgets via `vi.setConfig({ testTimeout })`,
           // so a hung non-spawning test still fails at the 5s default.

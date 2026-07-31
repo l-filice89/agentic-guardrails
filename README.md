@@ -388,12 +388,26 @@ boundaries:                 # optional: powers the axiom-1 direction/unassigned 
     app: [lib]              # app may import lib; undeclared pairs are violations
 artifactRetention: 100      # newest per-run artifacts kept per reviews/<scope>/ (committed history is never pruned)
 dispositionPolicy: skip     # skip | deferred — non-interactive DR-1 finding disposition
+exclude:                    # optional: posix path prefixes removed from every review scope
+  - tests/__fixtures__/     # (change set AND changed-KLOC denominator; counted and
+  - vendor/generated.ts     #  declared per run, never silent — see docs/adr/ADR-006)
 ```
+
+Exclude entries are literal prefixes, never globs — a filename that
+contains glob characters itself (`pages/[id].ts`) cannot be excluded by
+exact path; exclude its parent directory instead.
 
 Enforcement semantics: `blocking` error findings above `maxFindings` exit 1;
 `advisory` findings are reported and persisted but never affect the exit
 code; `off` axioms do not run (declared in the run manifest's `axiomsOff`).
 Config content participates in the run identity hash.
+
+Dogfood CI: this repo reviews its own PRs with the tool itself — a PR-only
+CI step runs `guardrails review` on the PR diff (deterministic-only,
+`--no-input`), fails the check on blocking findings, asserts the <60s
+review envelope, and uploads the run artifact as a workflow artifact
+without committing it. The repo's own dirty analyzer fixtures are handled
+by the `exclude` config above. See `docs/dogfood-ci.md`.
 
 Noise gate: the "<30% noise" claim is measured, not asserted — CI sweeps the
 analyzers' labeled fixture sets and fails at ≥30% overall or any analyzer

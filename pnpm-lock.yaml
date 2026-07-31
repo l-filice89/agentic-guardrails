@@ -11,12 +11,18 @@ importers:
       '@agentic-guardrails/contracts':
         specifier: workspace:*
         version: link:packages/contracts
+      '@agentic-guardrails/core':
+        specifier: workspace:*
+        version: link:packages/core
       '@changesets/cli':
         specifier: ^2.31.0
         version: 2.31.0(@types/node@26.1.1)
       '@eslint/js':
         specifier: ^10.0.1
         version: 10.0.1(eslint@10.6.0)
+      '@types/node':
+        specifier: ^26.1.1
+        version: 26.1.1
       eslint:
         specifier: ^10.6.0
         version: 10.6.0

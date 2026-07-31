@@ -162,7 +162,10 @@ export async function reviewCommand(
     // "declared only" means), but an inconclusive run must never print the
     // same thing a clean one prints.
     for (const d of result.declaredOnly) {
-      process.stderr.write(`guardrails review: inconclusive: ${degradationText(d)}\n`);
+      // A config-driven exclusion (1.18) is a DELIBERATE narrowing, not an
+      // inconclusive axiom — its own label, same never-silent channel.
+      const label = d.subject === "scope-exclusions" ? "excluded" : "inconclusive";
+      process.stderr.write(`guardrails review: ${label}: ${degradationText(d)}\n`);
     }
 
     if (result.degradedRun) {

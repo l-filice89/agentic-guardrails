@@ -69,5 +69,7 @@ export * from "./report/trends.js";
 export * from "./pipeline/gh-metadata.js";
 export * from "./pipeline/manifest.js";
 export * from "./pipeline/merge.js";
+export * from "./pipeline/normalize-cache-truth.js";
 export * from "./pipeline/pipeline.js";
 export * from "./pipeline/scope.js";
+export * from "./util/fold-case.js";
