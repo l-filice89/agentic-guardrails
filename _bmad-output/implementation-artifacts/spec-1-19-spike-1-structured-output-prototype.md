@@ -2,8 +2,9 @@
 title: 'Story 1.19: SPIKE-1 — Structured-Output Prototype (M1 signal)'
 type: 'feature'
 created: '2026-07-31'
-status: 'in-review'
+status: 'done'
 baseline_revision: 3131914af729fdfa1165b9a6ea711b439023efc4
+final_revision: c57d5846f94ca464d65450d5f85a01cb0ccf28c5
 review_loop_iteration: 0
 followup_review_recommended: true # OVERSIZED accepted (treat as true from the start) + the review pass materially reframed the M1 evidence doc's claims
 context: []
