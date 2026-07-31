@@ -10,6 +10,26 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- SPIKE-1 — structured-output prototype, the M1 signal (Story 1.19,
+  `docs/spikes/SPIKE-1-structured-output.md` + raw results
+  `docs/spikes/SPIKE-1-results.json`): **PASS** — 50 genuine headless
+  `claude -p` invocations of a throwaway handshake skill over the ADR-001
+  `<axiom>.in`/`.out` envelope (built via the shipped `axiomEnvelope`
+  factory, carrying the shipped `findingSchema` verbatim) produced 50/50
+  raw-valid outputs on the first attempt (0% raw failure, 100% post-repair
+  vs the ≥98% bar; the ADR-001 repair ladder never fired on a real
+  invocation — its wiring is proven by the stub self-test, all five outcome
+  classes classified correctly before any paid run). File-handshake
+  fidelity throughout: atomic temp→rename as the only completion signal, a
+  torn temp never read. No envelope or ADR-001 change was demanded by the
+  data; `contracts` shipped untouched. Per the story contract no harness or
+  skill code survives — the instrument was committed intact at
+  `9aaf9cd` (the resurrection point — tag `spike-1-harness`, recorded in
+  the spike doc) and deleted.
+  The open RULESET_VERSION ledger entry carries its decision: per-axiom
+  ruleset versioning (per-axiom version map in each axiom's findings-cache
+  key, manifest-declared), implementation owned by the Epic-1 epic-end
+  sweep, pre-Epic-3.
 - Dogfood CI workflow and review exclusions (Story 1.18). The M1 gate gets
   its mechanism: a PR-only CI step runs `guardrails review` on the PR diff
   via direct CLI invocation (`--no-input`, deterministic-only), failing the
