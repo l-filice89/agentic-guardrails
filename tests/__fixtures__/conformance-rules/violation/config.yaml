@@ -1,0 +1,9 @@
+# yaml-language-server: $schema=./config.schema.json
+# Axiom 3 (cleanliness) is OFF for fixture isolation, not because the rules
+# are wrong: every file in a conformance diff is a fresh module nothing
+# imports yet, which is precisely what `cleanliness/unused-export` reports.
+# Those findings would drown the axiom-6 oracle while saying nothing about
+# conformance. Axioms 1, 4, and 5 stay on and must remain silent here.
+axioms:
+  '3':
+    enforcement: 'off'

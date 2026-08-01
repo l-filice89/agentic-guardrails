@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "runId": "0123456789abcdef",
+  "scope": "uncommitted",
+  "changedFiles": ["src/b.ts"],
+  "deletedFiles": ["src/old.ts"],
+  "findings": [
+    {
+      "findingId": "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90",
+      "axiom": "1",
+      "ruleId": "structural/circular-import",
+      "location": { "file": "src/a.ts", "startLine": 1, "endLine": 1 },
+      "message": "circular import: src/a.ts -> src/b.ts -> src/a.ts",
+      "tier": "deterministic",
+      "source": "ast",
+      "confidence": 1,
+      "severity": "error",
+      "enclosingSymbol": "src/a.ts -> src/b.ts -> src/a.ts"
+    }
+  ],
+  "degraded": [
+    {
+      "reason": "disposition ledger absent until init (story 1.8); sentinel hash recorded",
+      "subject": "ledger"
+    }
+  ],
+  "manifest": {
+    "schemaVersion": 1,
+    "ledgerHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "corpusHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "rulesetVersion": "1",
+    "tierEnablement": { "deterministic": true, "llm": false },
+    "engineVersion": "0.0.1"
+  }
+}

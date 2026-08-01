@@ -1,0 +1,37 @@
+{
+  "name": "@agentic-guardrails/cli",
+  "version": "0.0.3",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "bin": {
+    "guardrails": "./dist/index.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run --config ../../vitest.config.ts packages/cli",
+    "typecheck": "tsc -b"
+  },
+  "dependencies": {
+    "@agentic-guardrails/contracts": "workspace:*",
+    "@agentic-guardrails/core": "workspace:*",
+    "commander": "^15.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "tsup": "^8.5.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.9"
+  }
+}

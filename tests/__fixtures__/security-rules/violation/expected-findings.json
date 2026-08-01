@@ -1,0 +1,114 @@
+[
+  {
+    "findingId": "786c61fce67e6aa8ea372107ce58ac2b0e8d0178d74a62b5fbc59569646f5ce1",
+    "axiom": "5",
+    "ruleId": "security/dangerous-api",
+    "location": {
+      "file": "src/dangerous.ts",
+      "startLine": 3,
+      "endLine": 3
+    },
+    "message": "dangerous API: `eval` executes strings as code — no legitimate application-code idiom; restructure to avoid dynamic code execution",
+    "tier": "deterministic",
+    "source": "ast",
+    "confidence": 1,
+    "severity": "error",
+    "enclosingSymbol": "run#eval-0"
+  },
+  {
+    "findingId": "e70e3c2385e17594bac6005d6b9770e281b49422933535dbee2b7da88cbbe02b",
+    "axiom": "5",
+    "ruleId": "security/dangerous-api",
+    "location": {
+      "file": "src/dangerous.ts",
+      "startLine": 8,
+      "endLine": 8
+    },
+    "message": "dangerous API: `setTimeout` with a string argument is implied `eval` — pass a function instead",
+    "tier": "deterministic",
+    "source": "ast",
+    "confidence": 1,
+    "severity": "error",
+    "enclosingSymbol": "schedule#setTimeout-0"
+  },
+  {
+    "findingId": "1a2e4af2f48dd5b584de420d642276af77db3711df7b34496b0988bb471cd339",
+    "axiom": "5",
+    "ruleId": "security/unsafe-deserialization",
+    "location": {
+      "file": "src/deserialize.ts",
+      "startLine": 5,
+      "endLine": 5
+    },
+    "message": "unsafe deserialization: `unserialize` from `node-serialize` executes attacker-controlled payloads (known RCE vector) — use `JSON.parse`",
+    "tier": "deterministic",
+    "source": "ast",
+    "confidence": 1,
+    "severity": "error",
+    "enclosingSymbol": "load#unserialize-0"
+  },
+  {
+    "findingId": "0d564e6bad41433012134c4ba0e125273c3e294daff9424babed6394ac03bb3b",
+    "axiom": "5",
+    "ruleId": "security/injection-sink",
+    "location": {
+      "file": "src/injection.ts",
+      "startLine": 7,
+      "endLine": 7
+    },
+    "message": "possible injection: `query` receives a dynamically built string (interpolation/concatenation) — use a parameterized query with bound arguments",
+    "tier": "deterministic",
+    "source": "ast",
+    "confidence": 1,
+    "severity": "warning",
+    "enclosingSymbol": "findUser#query-0"
+  },
+  {
+    "findingId": "6d91d1fa167490f157319d0c7ed765f90bc2a0237ce0cae15484e54483c9ef61",
+    "axiom": "5",
+    "ruleId": "security/hardcoded-secret",
+    "location": {
+      "file": "src/secrets.ts",
+      "startLine": 5,
+      "endLine": 5
+    },
+    "message": "hardcoded secret: AWS access key id in source — remove it, rotate the credential, and load it from the environment or a secret store",
+    "tier": "deterministic",
+    "source": "regex",
+    "confidence": 1,
+    "severity": "error",
+    "enclosingSymbol": "aws-access-key-id-0"
+  },
+  {
+    "findingId": "3b3c40c76e494f4bb0100fe4cbc9b48e30891cfade37a5d0f2ddb942282805af",
+    "axiom": "5",
+    "ruleId": "security/hardcoded-secret",
+    "location": {
+      "file": "src/secrets.ts",
+      "startLine": 9,
+      "endLine": 9
+    },
+    "message": "hardcoded secret: GitHub fine-grained PAT in source — remove it, rotate the credential, and load it from the environment or a secret store",
+    "tier": "deterministic",
+    "source": "regex",
+    "confidence": 1,
+    "severity": "error",
+    "enclosingSymbol": "github-fine-grained-pat-0"
+  },
+  {
+    "findingId": "c6f0cd00fd1ee8a985f5e37f4f5db29ebb6b1f3a84301f750d3e32e1fbd65c47",
+    "axiom": "5",
+    "ruleId": "security/hardcoded-secret",
+    "location": {
+      "file": "src/secrets.ts",
+      "startLine": 13,
+      "endLine": 13
+    },
+    "message": "possible hardcoded secret: a long string literal assigned to a secret-named identifier — load it from the environment or a secret store",
+    "tier": "deterministic",
+    "source": "regex",
+    "confidence": 1,
+    "severity": "warning",
+    "enclosingSymbol": "secret-assignment-0"
+  }
+]

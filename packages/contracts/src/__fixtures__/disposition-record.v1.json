@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "recordId": "ed18f148e31f47ad29ca2c708d8d1e5d88fb8f107e11c78977966ea9b629336f",
+  "key": {
+    "runId": "run-0001",
+    "findingId": "a3f1c2e4d5b6978800112233445566778899aabbccddeeff0011223344556677"
+  },
+  "disposition": "actionable",
+  "revision": 0
+}

@@ -1,0 +1,61 @@
+SPIKE-5 worktree lifecycle — 2026-07-25T22:42:46.339Z
+hardware: 12th Gen Intel(R) Core(TM) i7-12700H | 20 logical cores | 15.6 GB RAM | node v24.6.0 | win32 10.0.26200
+git: git version 2.39.1.windows.1 | cycles: 100
+temp: C:\Users\Luka8\AppData\Local\Temp\spike5-jsQU0J
+
+[cycles x100] ...
+  20/100 cycles
+  40/100 cycles
+  60/100 cycles
+  80/100 cycles
+  100/100 cycles
+  PASS (53.7s) — 100 cycles, 0 leaks, 0 locks, tree byte-identical; per-cycle median 458ms (min 399, max 585) — DESCRIPTIVE, not a gate criterion
+
+[process kill mid-run] ...
+  PASS (2.1s) — kill left 1 registration + 1 directory (both asserted); reclaimWorktrees removed it; tree byte-identical
+
+[held handle (released during backoff)] ...
+  PASS (2.2s) — holder blocked removal for 2 attempt(s); attempt 3 succeeded after release; zero residue
+
+[held handle (held through every attempt)] ...
+  PASS (2.6s) — removal failed loudly as a typed degradation after 3 attempts (never a silent leak); reclaim cleared it once released; tree byte-identical
+
+[long path (checked-out file >260 chars)] ...
+  PASS (1.0s) — checked out a 334-char path (core.longpaths=true) and removed it cleanly
+
+[long path (long base AND deep checkout together)] ...
+  PASS (1.0s) — a 160-char base (at the gate limit) plus a 424-char checked-out path succeeded together and cleaned up
+
+[measure: real base-path threshold (binary search)] ...
+  PASS (2.8s) — largest WORKING base 213 chars, smallest FAILING 216 ("fatal: '$GIT_DIR' too big"), deepest tracked path 237 chars; MAX_BASE_PATH_LENGTH=160 sits below it with headroom
+
+[long path (base dir >260 chars)] ...
+  PASS (1.0s) — 291-char base declared unusable ("base path is 304 chars (max 160); git cannot create a worktree under a long base…"), ran under the alternative, zero residue
+
+[case-collision refs (foo / FOO)] ...
+  PASS (2.3s) — git REFUSED a case-variant ref; foo/FOO produced DIFFERENT ref-derived components at distinct coexisting directories, the same ref reproduced its component at a distinct directory, all cleaned up
+
+[base dir unusable (degrade declared)] ...
+  PASS (1.0s) — unwritable base declared ("ENOTDIR: not a directory, mkdir 'C:\Users\Luka8\AppData\Loca…") and the run continued on the alternative; zero residue
+
+[foreign worktree untouched by reclamation] ...
+  PASS (2.5s) — human worktree (in the base dir), a prefixed worktree outside the base dir, and ANOTHER repository's live worktree inside the base dir all survived; the foreign one was DECLARED `unowned`; only our residue was reclaimed
+
+================ RESULTS ================
+PASS cycles x100                                      53.7s
+PASS process kill mid-run                             2.1s
+PASS held handle (released during backoff)            2.2s
+PASS held handle (held through every attempt)         2.6s
+PASS long path (checked-out file >260 chars)          1.0s
+PASS long path (long base AND deep checkout together) 1.0s
+PASS measure: real base-path threshold (binary search) 2.8s
+PASS long path (base dir >260 chars)                  1.0s
+PASS case-collision refs (foo / FOO)                  2.3s
+PASS base dir unusable (degrade declared)             1.0s
+PASS foreign worktree untouched by reclamation        2.5s
+
+cleaning up temp ...
+
+SPIKE5_JSON {"verdict":"PASS","gateRun":true,"platform":"win32 10.0.26200","node":"v24.6.0","git":"git version 2.39.1.windows.1","cycles":100,"gateCycles":100,"scenarios":[{"name":"cycles x100","ms":53691,"status":"pass","metrics":{"cycles":100,"medianMs":458,"minMs":399,"maxMs":585},"detail":"100 cycles, 0 leaks, 0 locks, tree byte-identical; per-cycle median 458ms (min 399, max 585) — DESCRIPTIVE, not a gate criterion"},{"name":"process kill mid-run","ms":2129,"status":"pass","metrics":{"residueAfterKill":{"registered":1,"dirs":1},"reclaimed":1},"detail":"kill left 1 registration + 1 directory (both asserted); reclaimWorktrees removed it; tree byte-identical"},{"name":"held handle (released during backoff)","ms":2246,"status":"pass","metrics":{"removalAttempts":3},"detail":"holder blocked removal for 2 attempt(s); attempt 3 succeeded after release; zero residue"},{"name":"held handle (held through every attempt)","ms":2581,"status":"pass","metrics":{"residueWhileHeld":1,"removalAttempts":3},"detail":"removal failed loudly as a typed degradation after 3 attempts (never a silent leak); reclaim cleared it once released; tree byte-identical"},{"name":"long path (checked-out file >260 chars)","ms":1011,"status":"pass","metrics":{"checkedOutLength":334},"detail":"checked out a 334-char path (core.longpaths=true) and removed it cleanly"},{"name":"long path (long base AND deep checkout together)","ms":1019,"status":"pass","metrics":{"baseLength":160,"checkedOutLength":424},"detail":"a 160-char base (at the gate limit) plus a 424-char checked-out path succeeded together and cleaned up"},{"name":"measure: real base-path threshold (binary search)","ms":2841,"status":"pass","metrics":{"largestWorkingBase":213,"smallestFailingBase":216,"deepestTrackedPath":237,"gateConstant":160,"failureAt":"fatal: '$GIT_DIR' too big"},"detail":"largest WORKING base 213 chars, smallest FAILING 216 (\"fatal: '$GIT_DIR' too big\"), deepest tracked path 237 chars; MAX_BASE_PATH_LENGTH=160 sits below it with headroom"},{"name":"long path (base dir >260 chars)","ms":1018,"status":"pass","metrics":{"baseLength":291},"detail":"291-char base declared unusable (\"base path is 304 chars (max 160); git cannot create a worktree under a long base…\"), ran under the alternative, zero residue"},{"name":"case-collision refs (foo / FOO)","ms":2273,"status":"pass","metrics":{"gitAllowsCaseVariantRefs":false,"refComponents":["2c26b46b68ff","9520437ce890"]},"detail":"git REFUSED a case-variant ref; foo/FOO produced DIFFERENT ref-derived components at distinct coexisting directories, the same ref reproduced its component at a distinct directory, all cleaned up"},{"name":"base dir unusable (degrade declared)","ms":1022,"status":"pass","detail":"unwritable base declared (\"ENOTDIR: not a directory, mkdir 'C:\\Users\\Luka8\\AppData\\Loca…\") and the run continued on the alternative; zero residue"},{"name":"foreign worktree untouched by reclamation","ms":2508,"status":"pass","metrics":{"reclaimed":1,"declared":["unowned"]},"detail":"human worktree (in the base dir), a prefixed worktree outside the base dir, and ANOTHER repository's live worktree inside the base dir all survived; the foreign one was DECLARED `unowned`; only our residue was reclaimed"}],"skipped":[],"invokingRepoUnchanged":true,"tempCleanupLeak":null}
+
+GATE (100 clean cycles + injected-failure suite): PASS

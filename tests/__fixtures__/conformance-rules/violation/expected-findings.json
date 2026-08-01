@@ -1,0 +1,49 @@
+[
+  {
+    "findingId": "9566f42b98cf0959e8d29476e1f92ade2101d913bd1bb79f1b74eab1670bf3c8",
+    "axiom": "6",
+    "ruleId": "conformance/file-placement",
+    "location": {
+      "file": "lib/stray-thing.ts",
+      "startLine": 1,
+      "endLine": 1
+    },
+    "message": "file placement: plain source files under the repo root live in src/ in 15/15 of the corpus, but this one sits in lib/ — move it to match",
+    "tier": "deterministic",
+    "source": "ast",
+    "confidence": 1,
+    "severity": "warning",
+    "enclosingSymbol": "source"
+  },
+  {
+    "findingId": "58117499c215a3a10cf57cbb1f3c08c238363fedcc87c017cf1a0d88682a000d",
+    "axiom": "6",
+    "ruleId": "conformance/naming-convention",
+    "location": {
+      "file": "src/core/MyNewThing.ts",
+      "startLine": 1,
+      "endLine": 1
+    },
+    "message": "naming convention: basename \"MyNewThing\" is PascalCase, but the corpus confirms kebab-case in 14/14 named files under src/core — rename to match",
+    "tier": "deterministic",
+    "source": "ast",
+    "confidence": 1,
+    "severity": "warning",
+    "enclosingSymbol": "MyNewThing"
+  },
+  {
+    "findingId": "0fc3b0643a9974adf9abf7392ed952c5680dd7fb3e2d7a18b143a726396dc197",
+    "axiom": "6",
+    "ruleId": "conformance/module-shape",
+    "location": {
+      "file": "src/core/odd-thing.ts",
+      "startLine": 1,
+      "endLine": 1
+    },
+    "message": "module shape: importers bind this module's default export, but the corpus confirms named bindings in 12/13 imported modules under src/core (1 of them use default) — switch to a named export to match",
+    "tier": "deterministic",
+    "source": "ast",
+    "confidence": 1,
+    "severity": "warning"
+  }
+]

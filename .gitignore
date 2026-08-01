@@ -18,3 +18,23 @@ npm-debug.log*
 
 # Test workspace artifacts
 tests/workspace/
+
+# v2 runtime build artifacts (packages/*)
+dist/
+dist-types/
+*.tsbuildinfo
+*.stackdump
+
+# Guardrails dogfood output — the GENERATED layers only.
+#
+# Narrowed in Story 1.16 from a blanket `_agentic-guardrails/`. That blanket
+# ignore made the COMMITTED layer unreachable: `history/trends.jsonl` and
+# `history/dispositions.jsonl` are committed by design (they are the
+# longitudinal record and DR-1's trust-metric source), and nothing under an
+# ignored directory can ever be committed — so the M1 gate would have had no
+# data source in the one repository that dogfoods the tool. These three
+# entries are exactly the layers `guardrails init` seeds into the consuming
+# repo's own `_agentic-guardrails/.gitignore` (SEEDED_IGNORE_LINES).
+_agentic-guardrails/reviews/
+_agentic-guardrails/.cache/
+_agentic-guardrails/config.schema.json

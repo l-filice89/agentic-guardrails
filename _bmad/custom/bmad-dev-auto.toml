@@ -1,0 +1,10 @@
+# Standing-rules include for bmad-dev-auto.
+# From https://github.com/l-filice89/bmad-standing-rules — see its README.
+# Arrays append on merge: add project-specific facts below the file: entries.
+
+[workflow]
+
+persistent_facts = [
+  "file:{project-root}/_bmad/custom/standing-rules-core.md",
+  "file:{project-root}/_bmad/custom/standing-rules-epic-process.md",
+]

@@ -1,0 +1,128 @@
+{
+  "nodes": [
+    {
+      "file": "src/aliased/target.ts",
+      "external": false
+    },
+    {
+      "file": "src/barrel.ts",
+      "external": false
+    },
+    {
+      "file": "src/impl.ts",
+      "external": false
+    },
+    {
+      "file": "src/lazy.ts",
+      "external": false
+    },
+    {
+      "file": "src/main.ts",
+      "external": false
+    },
+    {
+      "file": "src/types.ts",
+      "external": false
+    },
+    {
+      "file": "src/types2.ts",
+      "external": false
+    },
+    {
+      "file": "typescript",
+      "external": true
+    },
+    {
+      "file": "unresolvable-pkg-xyz",
+      "external": true
+    }
+  ],
+  "edges": [
+    {
+      "from": "src/barrel.ts",
+      "to": "src/impl.ts",
+      "dynamic": false,
+      "typeOnly": false,
+      "reExport": true,
+      "line": 2,
+      "names": [
+        "fromBarrel"
+      ]
+    },
+    {
+      "from": "src/main.ts",
+      "to": "src/aliased/target.ts",
+      "dynamic": false,
+      "typeOnly": false,
+      "reExport": false,
+      "line": 3,
+      "names": [
+        "aliased"
+      ]
+    },
+    {
+      "from": "src/main.ts",
+      "to": "src/barrel.ts",
+      "dynamic": false,
+      "typeOnly": false,
+      "reExport": false,
+      "line": 4,
+      "names": [
+        "fromBarrel"
+      ]
+    },
+    {
+      "from": "src/main.ts",
+      "to": "src/lazy.ts",
+      "dynamic": true,
+      "typeOnly": false,
+      "reExport": false,
+      "line": 11,
+      "names": [
+        "*"
+      ]
+    },
+    {
+      "from": "src/main.ts",
+      "to": "src/types.ts",
+      "dynamic": false,
+      "typeOnly": true,
+      "reExport": false,
+      "line": 7,
+      "names": [
+        "SomeType"
+      ]
+    },
+    {
+      "from": "src/main.ts",
+      "to": "src/types2.ts",
+      "dynamic": false,
+      "typeOnly": true,
+      "reExport": false,
+      "line": 8,
+      "names": [
+        "OnlyInline"
+      ]
+    },
+    {
+      "from": "src/main.ts",
+      "to": "typescript",
+      "dynamic": false,
+      "typeOnly": false,
+      "reExport": false,
+      "line": 2,
+      "names": [
+        "*"
+      ]
+    },
+    {
+      "from": "src/main.ts",
+      "to": "unresolvable-pkg-xyz",
+      "dynamic": false,
+      "typeOnly": false,
+      "reExport": false,
+      "line": 6,
+      "names": []
+    }
+  ]
+}

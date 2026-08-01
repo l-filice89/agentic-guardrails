@@ -128,6 +128,320 @@ This creates a temporary git repo pre-loaded with the fixtures and prints the co
 
 ---
 
+## v2 runtime (work in progress)
+
+This repo is being reworked into a programmatic Node/TypeScript runtime engine
+(a deterministic-first, then LLM-deepened, code review engine). The legacy
+plugin above (`commands/`, `skills/`, slash commands) **remains fully
+functional and installable exactly as documented** throughout the rework;
+nothing above changes until the legacy decommission milestone.
+
+The v2 runtime lives in a pnpm-workspaces monorepo under `packages/`:
+
+- `packages/contracts` (`@agentic-guardrails/contracts`) — the standalone
+  Zod schema package (sole runtime dependency: `zod`); the single source of
+  truth for data shapes crossing package boundaries: the canonical `Finding`
+  (+ `computeFindingId`, a line-drift-stable sha256 identity), `RunManifest`,
+  the ADR-001 LLM envelope factory, config (+ generated JSON Schema), the
+  generic partial-result contract, OD-1 trend records, DR-1 disposition
+  records, and a `migrateArtifact` forward-migration ladder for persisted
+  artifacts. All boundary validation is `safeParse`-based; exported helpers
+  never throw on bad input.
+- `packages/core` (`@agentic-guardrails/core`) — the deterministic,
+  **LLM-free** analysis engine. This boundary is lint-enforced, not just
+  documented (see `docs/adr/ADR-005-contracts-package.md`). Ships the
+  `LanguageAdapter` seam with a ts-morph-backed `TypeScriptAdapter`
+  (`docs/adr/ADR-004-ast-tooling.md`) that builds a deterministic import
+  graph — compiler-accurate resolution of `paths` aliases, barrels,
+  re-exports, and type-only imports; dynamic imports and `require` calls
+  are discovered by AST walking, with literal specifiers resolved via the
+  compiler and non-literal ones surfacing as typed degradations — with
+  byte-stable serialization and `fanIn`/`fanOut` queries. Unresolvable
+  imports, unresolved bare specifiers (recorded as external but flagged
+  unverified), and tsconfig load failures all surface as typed degradations
+  via the partial-result contract, never throws.
+
+- `packages/cli` (`@agentic-guardrails/cli`) — the `guardrails` command.
+  `guardrails review` reviews all uncommitted changes (staged, unstaged,
+  untracked) through the real pipeline: preflight → deterministic analyzers
+  (the Axiom #1 structural rule set — circular imports, unresolved imports,
+  dependency direction, unassigned files; see
+  `docs/rules/axiom-1-structural.md` — the Axiom #3 cleanliness rule
+  set — unreachable code, unused exports, copy-paste duplication, excessive
+  complexity; see `docs/rules/axiom-3-cleanliness.md` — the Axiom #4
+  NFR structural rule set — unbounded `Promise.all` fan-out, sync fs I/O in
+  async flow, `fetch` without an AbortSignal; all warnings by design, see
+  `docs/rules/axiom-4-nfr.md` — and the Axiom #5 security rule set —
+  hardcoded secrets via raw-text regex over pinned token formats (AWS
+  `AKIA`/`ASIA`, GitHub classic + fine-grained, Slack, OpenAI/Anthropic
+  `sk-`, PEM headers — scanned across EVERY changed file, not just
+  TypeScript: `.env`, `.json`, `.yaml`, Dockerfiles included, and caught even
+  in comments and unparseable files; vendor-published sample credentials are
+  allowlisted) plus a secret-named-assignment/comparison heuristic, injection
+  sinks (interpolated/concatenated strings into `query`/`execute`/`exec`;
+  constant-foldable concatenation never flags), dangerous APIs (`eval`
+  including indirect forms, the `Function` constructor with a string body,
+  string `setTimeout`/`setInterval`, `vm`), and unsafe deserialization
+  (`node-serialize` `unserialize`, `v8.deserialize`); errors only where
+  near-certain — FR-32 names axiom 5 as the gate-critical axiom and its rules
+  are error-dense, see `docs/rules/axiom-5-security.md`; and the Axiom #6
+  conformance rule set — off-convention file naming, misplaced file kinds and
+  minority module shape, judged against the persisted structural corpus seed
+  `guardrails init` derives. A convention fires ONLY when the corpus confirms
+  it: ≥10 samples in the nearest qualifying directory scope AND ≥80%
+  dominance. A file is judged on naming and placement only where its path is
+  NEW to the corpus, and every message cites measured counts, e.g. `kebab-case
+  in 12/12 named files under src/core`. All warnings by design; an absent seed
+  is inconclusive rather than clean — zero findings plus one declared
+  degradation that is printed but never drives exit 2, while a corrupt seed
+  degrades the run like any other lost coverage. See
+  `docs/rules/axiom-6-conformance.md`) → aggregation
+  (overlapping same-file/same-axiom findings merged per FR-21: >50%-of-the-
+  smaller-range overlap, strongest severity, source union, both messages
+  preserved) → composition. Unchanged inputs are served from a
+  content-addressed cache under `_agentic-guardrails/.cache/{graph,findings}/`
+  (gitignored, pruned to the newest 100 entries per kind): a hit skips both
+  the graph build and analyzer execution and is declared in the manifest's
+  `cache` counters; a torn or stale entry is revalidated through the
+  contracts schema and recomputed with a typed degradation — never wrong
+  data. Phase 1 runs under a wall-clock budget (30s, SPIKE-3-derived) that
+  degrades to partials via AbortSignal instead of failing the run. It prints
+  a plain-text summary (degraded work listed in the header) and atomically
+  writes a deterministic review artifact — RunManifest embedded (with the
+  declared six-phase assembly), byte-identical for
+  identical input — to `_agentic-guardrails/reviews/uncommitted/<run-id>.json`
+  (the `reviews/<scope>/` layout; the folder is created on demand, or up
+  front by `guardrails init`). Exit codes: `0` clean, `1` error-severity
+  findings, `2` degraded run or preflight failure (e.g. not a git repo).
+  When the committed knowledge files exist (`conventions.yaml` /
+  `corpus-map.yaml`, seeded by `init`), the manifest carries the sha256 of
+  their bytes; absent inputs are declared with sentinel hashes and typed
+  degradation entries — never faked.
+
+### Review scopes (`--branch` / `--pr` / `--project`)
+
+`guardrails review` reviews four things. Bare `guardrails review` is unchanged
+— the uncommitted working tree, filed under `reviews/uncommitted/`.
+
+| Flag | Change set | Artifact directory |
+|---|---|---|
+| *(none)* | staged + unstaged + untracked | `reviews/uncommitted/` |
+| `--branch [ref]` | `diff` from the merge-base of the base ref and `ref` (default: the checked-out branch) | `reviews/branch-{slug}/` |
+| `--pr <id>` | same, over a **locally fetched** PR ref | `reviews/pr-{id}/` |
+| `--project` | every tracked file (not a diff) | `reviews/project/` |
+
+The three scope flags are mutually exclusive (exit 2). `--base <ref>` pins the
+diff base for `--branch`/`--pr`; without it the repo's own default branch is
+resolved in order — `refs/remotes/origin/HEAD`, `origin/main`, `main`,
+`master` — and anything below the first is **declared as a guess** on stderr.
+No candidate at all is a typed failure naming `--base`, never a silent
+full-history diff.
+
+**Isolated execution means isolated from a ref checkout.** A worktree is
+created ONLY when the reviewed ref is not the current HEAD; reviewing a ref
+that already is HEAD (and `--project`) analyzes in place, because checking it
+out into a worktree would silently drop your uncommitted state. The worktree
+is detached, removed in a `finally`, and swept by the next run's reclamation
+if a process is killed before it gets there (Story 1.14 / SPIKE-5). Artifacts
+are always written to the **invoking** repository — the worktree is deleted,
+so nothing written inside it survives.
+
+**No network, at all.** A `--pr` ref must already be present locally
+(`refs/pull/<id>/head` or `refs/remotes/origin/pull/<id>/head`); an absent one
+fails with the exact `git fetch` command to run. Nothing is fetched, nothing is
+pushed (Epic 5 owns remote flows). If `gh` happens to be on PATH and
+authenticated it is asked — through the user's own client, parsed through a
+schema — for PR title/base/head/author; every failure mode (absent,
+unauthenticated, erroring, timing out, unparseable) is a declared degradation
+and never a gate.
+
+**Artifact disposition — commit or drop.** `reviews/` is gitignored by design,
+so on an interactive TTY the run offers to `git add -f` **that one file** and
+make a pathspec-limited `[skip ci]` commit (`c`/`commit` or `y`/`yes`). It
+never edits `.gitignore`, never `git add -A`, and leaves the rest of your index
+and working tree byte-identical — including `--no-verify`, so a lint-staged
+style `pre-commit` hook cannot stage or rewrite files during our partial
+commit; the artifact is generated output, not your work, and every commit *you*
+make is still hooked. EOF, a pipe, CI, `--no-input`, and Ctrl-C at the prompt
+all **drop** — the artifact stays on disk, untracked. Re-running a
+deterministic review re-commits nothing: identical bytes already in `HEAD` are
+reported as `already committed (unchanged)`. A commit that cannot happen (a
+detached `HEAD`, a mid-merge index, a hook that survives `--no-verify`) copies
+the artifact to a temp directory and reports the path. Disposition never
+changes the exit code.
+
+`GUARDRAILS_NO_GH=1` keeps the optional `gh pr view` lookup out of the loop
+entirely (it degrades exactly as an absent `gh`) — useful in tests and on
+machines where `gh` must never be invoked.
+
+**Concurrent runs.** Every worktree carries a `.agtwt-live` file holding the
+pid of the process that created it, so reclamation skips a worktree another
+*process* is still using — two `guardrails` runs against the same repository no
+longer delete each other's analysis. A registered worktree on disk whose
+liveness cannot be established (no readable marker) is **declared** (`in-use`)
+and left alone rather than removed; clear it with `git worktree remove` if it
+really is residue. Ceilings: liveness is a pid check, not a lease, so a pid
+recycled by an unrelated process keeps its worktree un-reclaimable until a
+human removes it; and git is spawned with `spawnSync`, so a removal plus its
+backoff blocks the event loop for its duration — do not expect overlap from
+concurrent scopes *within* one process.
+
+**In-place runs declare their divergence.** `--branch <current>` and
+`--project` analyze the working tree you are standing in (see above), so the
+change set comes from commits while the bytes come from your tree. When that
+tree is dirty the run says so — `inconclusive: analyzed IN PLACE with N
+uncommitted change(s) …` — and an empty ref diff (`--branch main --base main`,
+an already-merged branch) is declared too, so "nothing was reviewed" never
+reads as "nothing was wrong". Neither changes the exit code.
+
+### Scores, trends and dispositions
+
+Every run records **raw** per-axiom severity counts plus the change size it
+measured (`git --numstat`), and derives an OD-1 score from them —
+`100 − (10·E + 3·W + 1·I)/changed-KLOC`, floored at 0, always printed with its
+formula version (`od-1-v1`). The counts are the record; the score is a view, so
+changing the formula re-derives history instead of poisoning it. Changed-KLOC
+floors at 0.1 so tiny and deletion-only diffs stay finite (**that edge rule is
+proposed, not ratified** — the version stamp exists so it can change).
+`--project` is not a diff, so it records counts and **omits** both the score
+and the denominator, with a declared reason, rather than inventing either.
+Binary files contribute 0 lines and are declared, never silently counted as no
+change, and `_agentic-guardrails/**` — including the history plane every run
+appends to — is excluded from the denominator so the engine's own output cannot
+inflate its own score.
+
+Each run appends one record to the **committed** `_agentic-guardrails/history/
+trends.jsonl` (append-only, `merge=union`, content-addressed `recordId` so an
+identical re-run appends nothing). The aggregator dedupes on that id, orders by
+**git ancestry** — the previous record of the same scope kind whose commit is
+the nearest ancestor of the commit *this run reviewed*, so a `--branch` review
+compares against that branch's own history rather than waiting to be merged —
+validates every line before trusting it (including recomputing `recordId` as a
+content address, so a hand-written record cannot win the tiebreak), skips and
+declares a record whose commit is gone, and cold-starts rather than reporting a
+delta from a store it cannot trust. The per-axiom delta is printed
+in the **report only**: it depends on prior history, so writing it into the
+artifact would break the byte-identity-for-identical-inputs invariant.
+
+Findings can be dispositioned `actionable` / `not-actionable` / `deferred` into
+the committed `history/dispositions.jsonl`, keyed `{runId, findingId}` — the
+source DR-1's trust metrics are computed from. This is independent of the
+1.15 artifact commit-or-drop prompt, and it never affects the exit code.
+`--no-input`, a pipe or a non-TTY never blocks: the default policy records
+**nothing** rather than fabricating a label nobody chose.
+
+`guardrails trends [--open]` renders `.cache/trends.html` — a fully
+self-contained page (inlined data, vanilla JS, inline CSS, hand-drawn SVG; no
+CDN, no network, no charting dependency), with an honest empty state on a first
+run and `--open` that is never fatal (and that hands the path to a plain
+executable, never to `cmd /c start`, which would re-parse it).
+
+`reviews/<scope>/` is pruned to the newest `artifactRetention` artifacts
+(default 100). **Committed history is never pruned.**
+
+Full detail, including the declared deviations from the PRD and architecture
+wording: [`docs/scores-trends-and-dispositions.md`](docs/scores-trends-and-dispositions.md).
+
+### Bootstrap (`guardrails init`)
+
+`guardrails init` bootstraps `_agentic-guardrails/` in a git repo: a
+committed `config.yaml` (via a small per-axiom questionnaire on a TTY, whose
+options come from the contracts schema; `--no-input` or piped stdin writes
+the documented defaults — no prompt ever blocks), empty-but-valid
+`conventions.yaml` + `corpus-map.yaml` (contracts-validated; full ledger
+semantics arrive in Epic 4), git wiring (`.gitattributes` with
+`history/*.jsonl merge=union`, plus the seeded `.gitignore` covering
+`reviews/`, `.cache/`, and the generated schema file), and a regenerable
+file-level structural corpus seed (`{file, fanIn}` per import-graph node) at
+`.cache/corpus/structural-seed.json`. Init only writes MISSING files — a
+re-run never clobbers a human-edited file (each is reported `created:` or
+`kept:`; wiring files get missing lines appended with user content
+preserved). No tsconfig → the seed is skipped with a declared reason. Exit
+codes: `0` success, `2` typed failure (not a git repo, write error).
+Subsequent reviews verify the git wiring at preflight and warn loudly
+(naming the consequence) when a wiring line has been removed.
+
+### Configuration (`_agentic-guardrails/config.yaml`)
+
+`guardrails review` reads an optional, git-trackable YAML config validated
+through the contracts schema. Missing file → defaults (declared on stderr as
+"using defaults"); every value deviating from defaults is logged explicitly
+at run start; invalid values are typed errors naming the offending path,
+exit 2. The tool keeps a generated `config.schema.json` beside the YAML —
+reference it for editor autocomplete:
+
+```yaml
+# yaml-language-server: $schema=./config.schema.json
+axioms:
+  "1":
+    enforcement: advisory   # blocking | advisory | off (every axiom defaults to blocking)
+  "5":
+    enforcement: blocking
+    maxFindings: 2          # tolerate up to N error findings before exit 1 (default 0)
+boundaries:                 # optional: powers the axiom-1 direction/unassigned rules
+  layers:
+    - name: app
+      paths: [src/app]      # repo-relative path prefixes (longest match wins)
+    - name: lib
+      paths: [src/lib]
+  allowed:
+    app: [lib]              # app may import lib; undeclared pairs are violations
+artifactRetention: 100      # newest per-run artifacts kept per reviews/<scope>/ (committed history is never pruned)
+dispositionPolicy: skip     # skip | deferred — non-interactive DR-1 finding disposition
+exclude:                    # optional: posix path prefixes removed from every review scope
+  - tests/__fixtures__/     # (change set AND changed-KLOC denominator; counted and
+  - vendor/generated.ts     #  declared per run, never silent — see docs/adr/ADR-006)
+```
+
+Exclude entries are literal prefixes, never globs — a filename that
+contains glob characters itself (`pages/[id].ts`) cannot be excluded by
+exact path; exclude its parent directory instead.
+
+Enforcement semantics: `blocking` error findings above `maxFindings` exit 1;
+`advisory` findings are reported and persisted but never affect the exit
+code; `off` axioms do not run (declared in the run manifest's `axiomsOff`).
+Config content participates in the run identity hash.
+
+Dogfood CI: this repo reviews its own PRs with the tool itself — a PR-only
+CI step runs `guardrails review` on the PR diff (deterministic-only,
+`--no-input`), fails the check on blocking findings, asserts the <60s
+review envelope, and uploads the run artifact as a workflow artifact
+without committing it. The repo's own dirty analyzer fixtures are handled
+by the `exclude` config above. See `docs/dogfood-ci.md`.
+
+Noise gate: the "<30% noise" claim is measured, not asserted — CI sweeps the
+analyzers' labeled fixture sets and fails at ≥30% overall or any analyzer
+whose false-positive rate rises above its committed baseline
+(`tests/__fixtures__/noise-baseline.json`). See
+`docs/spikes/SPIKE-4-noise-metric.md` for the metric definition.
+
+More packages (`llm`, `action`, `plugin`) land as later stories need
+them. See `docs/adr/` for architecture decision records and `roadmap.md` for
+the milestone sequencing.
+
+**Licensing:** the legacy plugin (this file's License section, below) stays
+MIT. The v2 runtime packages under `packages/` are licensed separately under
+Apache-2.0 (declared per-package in each `package.json`); per-package
+`LICENSE` files are added at the M4 packaging milestone.
+
+### Prerequisites
+
+- Node.js 24 LTS
+- pnpm 11.x (`npm i -g pnpm@11` if you don't already have it; the
+  `packageManager` field pins the exact version CI uses)
+
+### Dev commands
+
+```bash
+pnpm install              # install workspace dependencies
+pnpm -r build             # build all packages (tsup), in topological order — run before tests (core tests import contracts/dist)
+pnpm -r test              # run each package's own tests
+pnpm test                 # run the full Vitest workspace (unit + tooling + integration)
+pnpm run lint              # ESLint, scoped to packages/**/src
+pnpm run typecheck          # tsc -b (project references, typecheck-only)
+pnpm run check:boundaries    # structural dependency-boundary check (core -> contracts only)
+```
+
 ## License
 
 MIT

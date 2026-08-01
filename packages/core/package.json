@@ -1,0 +1,36 @@
+{
+  "name": "@agentic-guardrails/core",
+  "version": "0.0.3",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run --config ../../vitest.config.ts packages/core",
+    "typecheck": "tsc -b"
+  },
+  "dependencies": {
+    "@agentic-guardrails/contracts": "workspace:*",
+    "p-map": "^7.0.6",
+    "ts-morph": "^28.0.0",
+    "yaml": "^2.9.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "tsup": "^8.5.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.9"
+  }
+}

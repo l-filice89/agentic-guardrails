@@ -1,0 +1,13 @@
+# Axiom 3 off: this fixture oracles the axiom-1 rule set in isolation —
+# its sources would otherwise also trip 1.10 cleanliness rules.
+axioms:
+  '3':
+    enforcement: 'off'
+boundaries:
+  layers:
+    - name: app
+      paths: [src/app]
+    - name: lib
+      paths: [src/lib]
+  allowed:
+    app: [lib]
