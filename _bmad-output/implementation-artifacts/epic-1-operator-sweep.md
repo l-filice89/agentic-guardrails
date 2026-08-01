@@ -2,13 +2,13 @@
 
 Date: 2026-08-01  
 Scope: Epic 1 — Zero-Cost Deterministic Review (M0 + M1)  
-Status: pending live GitHub PR/protection evidence
+Status: complete
 
 ## Deferred-work triage
 
 - The main `deferred-work.md` ledger contains 11 Epic 1 entries. Every entry now has a terminal disposition: resolved, ruled/discarded with evidence, listed for future work with a reopen trigger, or reassigned to an explicit receiving-story acceptance criterion.
 - Reassigned work is gated in the planning artifact: knowledge provenance in Story 4.1, corpus trust/provenance in Story 4.2, symbol identity/display separation in Story 4.5, and Windows lifecycle automation/posture in Story 5.4.
-- The separate `epic-1-deferred-items.md` ledger has two entries. D2 is executed with the chosen TypeScript configuration recorded. D1 remains open only until this closeout enables and re-reads GitHub branch protection; the epic cannot be marked done before that evidence lands.
+- The separate `epic-1-deferred-items.md` ledger has two executed entries. D2 records the chosen TypeScript configuration. D1 records live PR #1 run `30696720139` and the re-read `main` protection: strict required context `ci`, admin enforcement and conversation resolution enabled, force-push/deletion disabled.
 
 ## Temporal behavior — “month three” audit
 
@@ -44,13 +44,10 @@ No zero-headroom scheduled path exists because Epic 1 ships no scheduled path.
 - Remaining consumers are one install, lint, typecheck, boundary check, recursive build, recursive package-test pass, and tooling/integration test pass. They share the job's 15-minute ceiling rather than each receiving a separate reservation.
 - Concurrency: one job per workflow/ref; a newer event cancels the previous in-progress job. Therefore one active 15-minute budget exists per ref, with no same-ref backlog growth.
 
-Result: no scheduled-job arithmetic or request fan-out exists. The product invocation has no hard combined worst-case wall-clock ceiling because synchronous units are cooperatively cancellable and Git recovery scales with residue count; no stronger bound is claimed. The live GitHub run remains the empirical gate for the 15-minute job and `<60 s` dogfood assertions.
+Result: no scheduled-job arithmetic or request fan-out exists. The product invocation has no hard combined worst-case wall-clock ceiling because synchronous units are cooperatively cancellable and Git recovery scales with residue count; no stronger bound is claimed. Live run `30696720139` completed the full job in 2m55s and the dogfood review in 6s.
 
 ## Merge-gate conclusion
 
-Local verification after independent review patches: lint, typecheck, boundaries, and recursive builds passed; package suites passed 62 contracts + 561 core + 48 CLI tests; the root suite passed 829 tests; `git diff --check` passed. Verification ran against the closeout tree derived from baseline `5d30eaa`; the publication commit records the exact final identity. Merge remains blocked until:
+Local verification after independent review patches: lint, typecheck, boundaries, and recursive builds passed; package suites passed 62 contracts + 561 core + 48 CLI tests; the root suite passed 829 tests; `git diff --check` passed. Verification ran against the closeout tree derived from baseline `5d30eaa`.
 
-1. the closeout branch is published in a PR;
-2. the live `CI / ci` check, including dogfood, passes;
-3. the dogfood artifact is present or the workflow explicitly reports why no artifact was produced; and
-4. `main` branch protection is enabled and re-read with `CI / ci` required.
+Draft PR #1 published the clean closeout history. GitHub run `30696720139` passed every step, including dogfood at 201 advisory warnings, zero errors, zero degraded findings, and 6s wall clock. Artifact `dogfood-review` (`8817496085`, 19,292 bytes) was uploaded with expiry `2026-08-08`. The `main` protection read-back requires strict `ci`; all four closeout gates are satisfied.

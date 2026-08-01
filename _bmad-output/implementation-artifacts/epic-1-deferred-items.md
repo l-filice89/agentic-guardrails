@@ -6,5 +6,5 @@ Each item must end in one of four terminal states before the epic-1 PR leaves dr
 
 | # | Origin | Severity | Item | Status |
 |---|--------|----------|------|--------|
-| D1 | Story 1.1 story-review r2 | low | "CI gates the PR" also requires GitHub branch-protection settings (repo-admin config, not code). Workflow existence + failing checks is the code deliverable; protection rules must be enabled manually. | open |
+| D1 | Story 1.1 story-review r2 | low | "CI gates the PR" also requires GitHub branch-protection settings (repo-admin config, not code). Workflow existence + failing checks is the code deliverable; protection rules must be enabled manually. | executed — live PR #1 run `30696720139` passed check `ci`; `main` protection was then enabled and re-read with strict required context `ci`, admin enforcement and conversation resolution enabled, and force-push/deletion disabled. |
 | D2 | Story 1.1 story-review r2 | low | Solution-style tsconfig (`files: []`) and `target` ES2023-vs-ES2024 left to dev-agent discretion. | executed — accepted as the project design: root `tsconfig.json` remains a solution-only reference graph with `files: []`; `tsconfig.base.json` remains ES2023, matching every shipped analyzer fixture and the Node 24 runtime without relying on ES2024-only library declarations. `pnpm run typecheck` is the proof gate. |

@@ -2,7 +2,7 @@
 title: 'Epic 1 Closeout'
 type: 'chore'
 created: '2026-08-01'
-status: 'in-review'
+status: 'done'
 baseline_commit: '5d30eaab341c2af1f9938b8b4ace2b7384eeec64'
 review_loop_iteration: 0
 context:
@@ -50,10 +50,10 @@ context:
 
 **Execution:**
 - [x] Complete and test the existing `RULESET_VERSIONS` implementation and downstream ledger/epic acceptance-criteria edits.
-- [ ] Close D1/D2 and create the operator sweep covering deferred work, temporal behavior, recovery, and total resource budgets.
+- [x] Close D1/D2 and create the operator sweep covering deferred work, temporal behavior, recovery, and total resource budgets.
 - [x] Run lint, typecheck, boundaries, builds, package tests, root tests, and whitespace validation.
-- [ ] Commit and push the closeout, create a PR, wait for `CI / ci`, inspect dogfood evidence, and enable matching `main` branch protection.
-- [ ] Mark Stories 1.17–1.19 and Epic 1 done, produce the Epic 1 retrospective, then mark its status done.
+- [x] Commit and push the closeout, create a PR, wait for `CI / ci`, inspect dogfood evidence, and enable matching `main` branch protection.
+- [x] Mark Stories 1.17–1.19 and Epic 1 done, produce the Epic 1 retrospective, then mark its status done.
 
 **Acceptance Criteria:**
 - Given all Epic 1 ledgers, when audited, then every entry has an evidence-backed terminal disposition or a receiving story AC.
@@ -68,6 +68,7 @@ context:
 - 2026-08-01: Second live run exposed a clean-checkout-only ordering defect: root typecheck resolved workspace package exports before declaration builds existed. Reordered CI to build workspace packages before typecheck; local generated `dist/` had masked the dependency.
 - 2026-08-01: Third live run exposed an isolated-worktree dependency-plane gap: bare package imports could not resolve because dependencies exist only in the invoking checkout. Added a verified-external fallback through that installed dependency plane without traversal or absolute-path leakage; local branch dogfood now exits 0 with zero degraded findings.
 - 2026-08-01: Fourth live run passed dogfood and artifact upload, then exposed Linux-only unit assumptions. Corrected untracked-scope and cache-failure assertions, limited long-path integration cases to Windows while retaining the platform-pure seam test on every runner, and fixed Linux reclamation of tool-prefixed file/symlink residue.
+- 2026-08-01: Fifth live run `30696720139` passed end to end. Dogfood completed in 6s with 201 advisory warnings, zero errors, and zero degraded findings; artifact `8817496085` was retained for seven days. Enabled and re-read strict `main` protection requiring `ci`, then synchronized sprint status and completed the evidence-led retrospective.
 
 ## Verification
 
@@ -78,3 +79,14 @@ context:
 - `gh api repos/l-filice89/agentic-guardrails/branches/main/protection` -- required status-check protection is enabled.
 
 **Local results (2026-08-01):** lint, typecheck, boundaries, recursive builds, and whitespace passed; package suites passed 62 contracts + 561 core + 48 CLI tests; root suite passed 829 tests.
+
+**GitHub results (2026-08-01):** draft PR #1 run `30696720139` passed in 2m55s. Dogfood passed in 6s with zero errors and zero degraded findings; artifact `dogfood-review` (`8817496085`) was uploaded. `main` protection requires strict context `ci` with admin enforcement and conversation resolution.
+
+## Suggested Review Order
+
+1. `packages/core/src/pipeline/manifest.ts:33` — per-axiom ruleset versioning and safe lookup.
+2. `packages/core/src/adapter/typescript-adapter.ts:496` — isolated source/dependency-plane resolution invariant.
+3. `packages/core/src/adapter/typescript-adapter.test.ts:150` — no-traversal/no-path-leak regression fixture.
+4. `.github/workflows/ci.yml:62` — live dogfood timing, artifact behavior, and gate order.
+5. `_bmad-output/implementation-artifacts/epic-1-operator-sweep.md:1` — deferred, temporal, recovery, resource, live-run, and protection evidence.
+6. `_bmad-output/implementation-artifacts/epic-1-retro-2026-08-01.md:1` — lessons, Epic 2 preparation, and owned action items.
