@@ -9,6 +9,12 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Isolated-ref reviews now resolve bare package imports against the invoking
+  checkout's installed dependency plane. Resolved dependencies remain verified
+  external nodes: they are neither traversed nor exposed as absolute paths in
+  review artifacts.
+
 ### Added
 - Epic 1 deferred-work sweep: all 11 ledger entries now have a terminal
   disposition. Per-axiom `RULESET_VERSIONS` replaces the global ruleset cache

@@ -1256,9 +1256,10 @@ describe("review scopes (1.15)", () => {
     // hardcoded location, so a leaked absolute analyze-root path in a
     // finding's `location.file` would never appear in the bytes at all.
     git(cwd, ["checkout", "-q", "feature"]);
+    const syntheticAwsKey = ["AKIA", "ABCDEFGHIJKLMNOP"].join("");
     writeFileSync(
       path.join(cwd, "feature.ts"),
-      'export const awsKey = "AKIA" + "ABCDEFGHIJKLMNOP";\n',
+      `export const awsKey = "${syntheticAwsKey}";\n`,
     );
     git(cwd, ["commit", "-qam", "secret"]);
     git(cwd, ["checkout", "-q", "main"]);
@@ -1296,9 +1297,10 @@ describe("review scopes (1.15)", () => {
     const worktreeBaseDir = tempDir();
     // `on-main.ts` is in the ref diff. Dirty it with a security finding that
     // does not exist in the commit; ref scope must still read committed bytes.
+    const syntheticAwsKey = ["AKIA", "ABCDEFGHIJKLMNOP"].join("");
     writeFileSync(
       path.join(cwd, "on-main.ts"),
-      'export const awsKey = "AKIA" + "ABCDEFGHIJKLMNOP";\n',
+      `export const awsKey = "${syntheticAwsKey}";\n`,
     );
     const result = await runReview({
       cwd,

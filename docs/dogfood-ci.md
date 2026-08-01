@@ -26,6 +26,11 @@ node packages/cli/dist/index.js review --branch HEAD --base "origin/$GITHUB_BASE
   — never a silent skip. Pushes to `main` skip the step (no base ref).
 - External surface: only GitHub Actions' default `GITHUB_TOKEN`; the tool
   itself has zero egress.
+- Branch reviews use an isolated worktree for the analyzed ref. Bare package
+  imports resolve through the invoking checkout's installed dependency plane;
+  those verified external modules are never traversed and their absolute paths
+  are never emitted. This keeps clean-runner analysis complete without running
+  dependency code or copying `node_modules` into the worktree.
 
 ## Artifact: upload, never commit
 

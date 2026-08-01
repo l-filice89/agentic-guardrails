@@ -122,7 +122,11 @@ export const axiom3Cleanliness: Analyzer = {
     // the pipeline wires one in; a hit skips the ts-morph parse entirely).
     const adapter = new TypeScriptAdapter();
     const build = (tsconfigPath: string) =>
-      adapter.buildImportGraph({ tsconfigPath, rootDir: context.repoRoot });
+      adapter.buildImportGraph({
+        tsconfigPath,
+        rootDir: context.repoRoot,
+        dependencyRoot: context.dependencyRoot,
+      });
     const graphResult = mergeGraphResults(
       context.tsconfigPaths.map(
         (tsconfigPath) =>

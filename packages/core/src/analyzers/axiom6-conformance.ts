@@ -475,7 +475,11 @@ function shapeFindings(
 
   const adapter = new TypeScriptAdapter();
   const build = (tsconfigPath: string) =>
-    adapter.buildImportGraph({ tsconfigPath, rootDir: context.repoRoot });
+    adapter.buildImportGraph({
+      tsconfigPath,
+      rootDir: context.repoRoot,
+      dependencyRoot: context.dependencyRoot,
+    });
   const graphResult = mergeGraphResults(
     context.tsconfigPaths.map(
       (tsconfigPath) =>

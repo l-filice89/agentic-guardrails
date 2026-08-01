@@ -127,7 +127,11 @@ export const axiom1Structural: Analyzer = {
     // Graph builds route through the content-addressed cache when the
     // pipeline wires one in (1.7) — a hit skips the ts-morph parse entirely.
     const build = (tsconfigPath: string) =>
-      adapter.buildImportGraph({ tsconfigPath, rootDir: context.repoRoot });
+      adapter.buildImportGraph({
+        tsconfigPath,
+        rootDir: context.repoRoot,
+        dependencyRoot: context.dependencyRoot,
+      });
     const graphResult = mergeGraphResults(
       context.tsconfigPaths.map(
         (tsconfigPath) =>

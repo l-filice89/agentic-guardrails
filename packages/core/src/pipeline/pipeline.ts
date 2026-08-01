@@ -160,6 +160,9 @@ export interface GraphCache {
 export interface AnalyzerContext {
   /** Absolute repo root (as git reports it). */
   repoRoot: string;
+  /** Invoking checkout containing installed dependencies. Diff/ref scopes
+   * analyze an isolated worktree that deliberately has no node_modules. */
+  dependencyRoot?: string;
   /** Changed analyzable TS files (present on disk), repo-root-relative,
    * `/`-separated, sorted. */
   changedFiles: readonly string[];
@@ -1058,6 +1061,7 @@ async function analyze(inputs: AnalysisInputs): Promise<AnalysisOutcome> {
 
   const context: AnalyzerContext = {
     repoRoot: analyzeRoot,
+    dependencyRoot: outputRoot,
     changedFiles: analyzableFiles,
     allChangedFiles: changedFiles,
     tsconfigPaths: discovery.tsconfigPaths,

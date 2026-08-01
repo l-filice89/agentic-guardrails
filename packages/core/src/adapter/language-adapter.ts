@@ -100,6 +100,10 @@ export interface BuildImportGraphOptions {
    * directory.
    */
   rootDir?: string;
+  /** Optional installed-dependency plane used when `rootDir` is an isolated
+   * git worktree without its own node_modules. Resolution is verification
+   * only; fallback files remain external and are never traversed. */
+  dependencyRoot?: string;
 }
 
 /** The seam analyzers depend on. Analyzed code is parsed as data, never

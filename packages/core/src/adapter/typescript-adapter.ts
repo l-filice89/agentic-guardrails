@@ -100,6 +100,9 @@ export class TypeScriptAdapter implements LanguageAdapter {
   buildImportGraph(options: BuildImportGraphOptions): ImportGraphBuildResult {
     const tsConfigFilePath = path.resolve(options.tsconfigPath);
     const rootDir = path.resolve(options.rootDir ?? path.dirname(tsConfigFilePath));
+    const dependencyRoot =
+      options.dependencyRoot === undefined ? undefined : path.resolve(options.dependencyRoot);
+    const fallbackResolvedPaths = new Set<string>();
 
     const toRel = (absolute: string): string =>
       normalizePath(path.relative(rootDir, absolute));
@@ -110,6 +113,24 @@ export class TypeScriptAdapter implements LanguageAdapter {
       project = new Project({
         tsConfigFilePath,
         skipAddingFilesFromTsConfig: false,
+        ...(dependencyRoot === undefined || dependencyRoot === rootDir
+          ? {}
+          : {
+              resolutionHost: (host, getCompilerOptions) => ({
+                resolveModuleNames: (moduleNames: string[], containingFile: string) =>
+                  moduleNames.map((specifier) =>
+                    resolveModuleNameWithFallback(
+                      specifier,
+                      containingFile,
+                      getCompilerOptions(),
+                      host,
+                      rootDir,
+                      dependencyRoot,
+                      fallbackResolvedPaths,
+                    ),
+                  ),
+              }),
+            }),
       });
       // Only the analyzed project's own files are walked; resolved
       // node_modules files are recorded as external nodes, never traversed.
@@ -213,7 +234,14 @@ export class TypeScriptAdapter implements LanguageAdapter {
       const queryTargetResolved =
         marker !== -1 &&
         sourceFile !== undefined &&
-        resolveWithCompiler(project, sourceFile, specifier.slice(0, marker)) !== undefined;
+        resolveWithCompiler(
+          project,
+          sourceFile,
+          specifier.slice(0, marker),
+          dependencyRoot,
+          fallbackResolvedPaths,
+          rootDir,
+        ) !== undefined;
       if (isBundlerAssetSpecifier(specifier, queryTargetResolved)) {
         attempt(from, specifier, true);
         nodes.push({ file: specifier, external: true });
@@ -221,6 +249,12 @@ export class TypeScriptAdapter implements LanguageAdapter {
         return;
       }
       if (resolvedAbsolutePath !== undefined) {
+        if (fallbackResolvedPaths.has(normalizePath(path.resolve(resolvedAbsolutePath)))) {
+          attempt(from, specifier, true);
+          nodes.push({ file: specifier, external: true });
+          edges.push({ from, to: specifier, ...flags, line, names });
+          return;
+        }
         const rel = toRel(resolvedAbsolutePath);
         if (rel.includes("node_modules/")) {
           // Resolved into node_modules: a verified external package.
@@ -303,7 +337,14 @@ export class TypeScriptAdapter implements LanguageAdapter {
         record(
           from,
           specifier,
-          resolveWithCompiler(project, sf, specifier),
+          resolveWithCompiler(
+            project,
+            sf,
+            specifier,
+            dependencyRoot,
+            fallbackResolvedPaths,
+            rootDir,
+          ),
           STATIC,
           decl.getStartLineNumber(),
           ["*"], // `import x = require(...)` binds the whole namespace
@@ -326,7 +367,14 @@ export class TypeScriptAdapter implements LanguageAdapter {
           record(
             from,
             specifier,
-            resolveWithCompiler(project, sf, specifier),
+            resolveWithCompiler(
+              project,
+              sf,
+              specifier,
+              dependencyRoot,
+              fallbackResolvedPaths,
+              rootDir,
+            ),
             { dynamic: isDynamicImport, typeOnly: false, reExport: false },
             call.getStartLineNumber(),
             ["*"], // the whole module namespace is reachable from the call
@@ -426,12 +474,51 @@ function resolveWithCompiler(
   project: Project,
   sf: SourceFile,
   specifier: string,
+  dependencyRoot?: string,
+  fallbackResolvedPaths: Set<string> = new Set(),
+  analysisRoot: string = path.dirname(sf.getFilePath()),
 ): string | undefined {
-  const result = ts.resolveModuleName(
+  return resolveModuleNameWithFallback(
     specifier,
     sf.getFilePath(),
     project.getCompilerOptions(),
     project.getModuleResolutionHost(),
-  );
-  return result.resolvedModule?.resolvedFileName;
+    analysisRoot,
+    dependencyRoot,
+    fallbackResolvedPaths,
+  )?.resolvedFileName;
+}
+
+/** Resolve against the analyzed tree first. An isolated ref worktree has no
+ * installed dependency plane, so unresolved bare packages get one fallback
+ * lookup from the invoking checkout's dependency root. Fallback resolutions
+ * are verification-only externals: source is never traversed or emitted. */
+function resolveModuleNameWithFallback(
+  specifier: string,
+  containingFile: string,
+  compilerOptions: ts.CompilerOptions,
+  host: ts.ModuleResolutionHost,
+  analysisRoot: string,
+  dependencyRoot: string | undefined,
+  fallbackResolvedPaths: Set<string>,
+): ts.ResolvedModuleFull | undefined {
+  const local = ts.resolveModuleName(specifier, containingFile, compilerOptions, host).resolvedModule;
+  if (local !== undefined || dependencyRoot === undefined) return local;
+  if (
+    specifier.startsWith(".") ||
+    path.isAbsolute(specifier) ||
+    matchesPathsAlias(specifier, Object.keys(compilerOptions.paths ?? {}))
+  ) {
+    return undefined;
+  }
+  const fallback = ts.resolveModuleName(
+    specifier,
+    path.join(dependencyRoot, path.relative(analysisRoot, containingFile)),
+    compilerOptions,
+    host,
+  ).resolvedModule;
+  if (fallback !== undefined) {
+    fallbackResolvedPaths.add(normalizePath(path.resolve(fallback.resolvedFileName)));
+  }
+  return fallback;
 }
