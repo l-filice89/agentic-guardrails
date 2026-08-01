@@ -495,7 +495,7 @@ function findingsCacheDir(cwd: string): string {
 }
 
 describe("runReview deterministic cache (1.7)", () => {
-  it("declares and disables caching after an operational write failure", async () => {
+  it("declares and disables caching after an operational cache failure", async () => {
     const cwd = tempRepoWithChange();
     const blockedKind = findingsCacheDir(cwd);
     mkdirSync(path.dirname(blockedKind), { recursive: true });
@@ -503,7 +503,7 @@ describe("runReview deterministic cache (1.7)", () => {
     const result = await runReview({ cwd, analyzers: [okAnalyzer] });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.artifact.manifest.cache?.disabled).toContain("cache write failed");
+    expect(result.artifact.manifest.cache?.disabled).toMatch(/cache (read|write) failed/);
     expect(result.runDegraded).toContainEqual(
       expect.objectContaining({ subject: "cache/findings/axiom-1" }),
     );

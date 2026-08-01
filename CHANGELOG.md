@@ -14,6 +14,9 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   checkout's installed dependency plane. Resolved dependencies remain verified
   external nodes: they are neither traversed nor exposed as absolute paths in
   review artifacts.
+- Worktree reclamation now removes tool-prefixed file and symlink residue
+  before applying directory ownership checks, including on Linux where
+  probing `<file>/.git` reports `ENOTDIR`.
 
 ### Added
 - Epic 1 deferred-work sweep: all 11 ledger entries now have a terminal

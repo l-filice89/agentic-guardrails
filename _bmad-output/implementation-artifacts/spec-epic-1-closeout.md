@@ -67,6 +67,7 @@ context:
 - 2026-08-01: First live GitHub run failed during action resolution: the pnpm v4 annotated-tag object SHA and its dereferenced commit had been assigned to the wrong action, while setup-node received pnpm's commit. Replaced both with verified repository commit SHAs; exact allowlist test updated.
 - 2026-08-01: Second live run exposed a clean-checkout-only ordering defect: root typecheck resolved workspace package exports before declaration builds existed. Reordered CI to build workspace packages before typecheck; local generated `dist/` had masked the dependency.
 - 2026-08-01: Third live run exposed an isolated-worktree dependency-plane gap: bare package imports could not resolve because dependencies exist only in the invoking checkout. Added a verified-external fallback through that installed dependency plane without traversal or absolute-path leakage; local branch dogfood now exits 0 with zero degraded findings.
+- 2026-08-01: Fourth live run passed dogfood and artifact upload, then exposed Linux-only unit assumptions. Corrected untracked-scope and cache-failure assertions, limited long-path integration cases to Windows while retaining the platform-pure seam test on every runner, and fixed Linux reclamation of tool-prefixed file/symlink residue.
 
 ## Verification
 

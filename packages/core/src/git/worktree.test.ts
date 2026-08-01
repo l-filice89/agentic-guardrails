@@ -330,7 +330,9 @@ describe("withWorktree", () => {
     expect(extraWorktrees(repoRoot)).toEqual([]);
   });
 
-  it("degrades a base path longer than git can handle on Windows", () => {
+  it.runIf(process.platform === "win32")(
+    "degrades a base path longer than git can handle on Windows",
+    () => {
     const { repoRoot } = fixture();
     const root = tempDir();
     const tooLong = path.join(root, "x".repeat(MAX_BASE_PATH_LENGTH + 1));
@@ -342,7 +344,8 @@ describe("withWorktree", () => {
       expect(resolved.degradation?.reason).toMatch(/max 160|long base/);
     }
     expect(existsSync(tooLong)).toBe(false);
-  });
+    },
+  );
 
   it("reports a typed failure when NEITHER base is usable", async () => {
     const { repoRoot } = fixture();
@@ -660,7 +663,9 @@ describe("reclaimWorktrees", () => {
     git(seed, ["worktree", "remove", "--force", invoking]);
   });
 
-  it("sweeps the previously-used base after a degrade, so residue is never orphaned", async () => {
+  it.runIf(process.platform === "win32")(
+    "sweeps the previously-used base after a degrade, so residue is never orphaned",
+    async () => {
     const { repoRoot } = fixture();
     const root = tempDir();
     // A base root that is perfectly READABLE but too long for git on Windows:
@@ -683,7 +688,8 @@ describe("reclaimWorktrees", () => {
     expect(result.degradations.map((d) => d.kind)).toEqual(["base-dir-degraded"]);
     expect(result.reclaimed.map((p) => path.resolve(p))).toEqual([path.resolve(orphan)]);
     expect(existsSync(orphan)).toBe(false);
-  });
+    },
+  );
 });
 
 describe("degradation contract adapter", () => {

@@ -325,7 +325,7 @@ describe("changeSetFor", () => {
       scopeOf(dir, { kind: "branch", ref: "feature" }),
       scopeOf(dir, { kind: "pr", ref: "42" }),
     ];
-    for (const scope of scopes) {
+    for (const [index, scope] of scopes.entries()) {
       const changed = changeSetFor(scope, dir);
       expect(changed.ok).toBe(true);
       if (!changed.ok) continue;
@@ -335,7 +335,10 @@ describe("changeSetFor", () => {
       const caseVariant = changed.value.files.includes(
         "_AGENTIC-GUARDRAILS/reviews/project/case.json",
       );
-      expect(caseVariant).toBe(!(process.platform === "win32" || process.platform === "darwin"));
+      const caseInsensitive = process.platform === "win32" || process.platform === "darwin";
+      // The case-variant file is untracked, so only the uncommitted scope can
+      // contain it; case-insensitive platforms exclude it as engine output.
+      expect(caseVariant).toBe(index === 0 && !caseInsensitive);
     }
   });
 

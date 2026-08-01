@@ -775,14 +775,6 @@ async function reclaimIn(
       });
       continue;
     }
-    if (!target.registered && !ownedByRepo(target.path, commonDir)) {
-      degradations.push({
-        kind: "unowned",
-        subject: target.path,
-        reason: "prefixed directory whose .git does not point at this repository — declared, not removed",
-      });
-      continue;
-    }
     if (!target.directory && !target.registered) {
       // A prefixed FILE or symlink: never a worktree, still residue.
       try {
@@ -795,6 +787,14 @@ async function reclaimIn(
           reason: error instanceof Error ? error.message : String(error),
         });
       }
+      continue;
+    }
+    if (!target.registered && !ownedByRepo(target.path, commonDir)) {
+      degradations.push({
+        kind: "unowned",
+        subject: target.path,
+        reason: "prefixed directory whose .git does not point at this repository — declared, not removed",
+      });
       continue;
     }
     const removal = await removeWorktree(repoRoot, target.path, { ...options, force: false });
