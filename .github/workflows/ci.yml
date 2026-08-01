@@ -41,14 +41,16 @@ jobs:
       - name: Lint
         run: pnpm run lint
 
-      - name: Typecheck
-        run: pnpm run typecheck
-
       - name: Boundary check
         run: pnpm run check:boundaries
 
       - name: Build
         run: pnpm -r build
+
+      # Clean checkouts do not have workspace package declarations yet;
+      # build them before the root solution typecheck resolves package exports.
+      - name: Typecheck
+        run: pnpm run typecheck
 
       # Story 1.18 dogfood (M1 gate): review this PR's own diff with the tool
       # itself — direct CLI invocation, deterministic-only, no packaged

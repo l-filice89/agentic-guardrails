@@ -65,6 +65,7 @@ context:
 
 - 2026-08-01: Independent Blind/Edge review patched prototype-key lookup, custom-analyzer cache namespace collisions, historical per-axiom version provenance, incomplete ledger terminal wording, optimistic operator arithmetic, explicit GitHub artifact retention, and a parallel-load test timeout. Preserved deterministic shipped-analyzer caching and existing product semantics.
 - 2026-08-01: First live GitHub run failed during action resolution: the pnpm v4 annotated-tag object SHA and its dereferenced commit had been assigned to the wrong action, while setup-node received pnpm's commit. Replaced both with verified repository commit SHAs; exact allowlist test updated.
+- 2026-08-01: Second live run exposed a clean-checkout-only ordering defect: root typecheck resolved workspace package exports before declaration builds existed. Reordered CI to build workspace packages before typecheck; local generated `dist/` had masked the dependency.
 
 ## Verification
 

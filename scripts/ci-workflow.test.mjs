@@ -22,4 +22,8 @@ describe("CI workflow supply-chain guard", () => {
   it("bounds dogfood artifact retention explicitly", () => {
     expect(workflow).toMatch(/name: dogfood-review[\s\S]*?retention-days: 7/);
   });
+
+  it("builds workspace declarations before clean-checkout typechecking", () => {
+    expect(workflow.indexOf("- name: Build")).toBeLessThan(workflow.indexOf("- name: Typecheck"));
+  });
 });
