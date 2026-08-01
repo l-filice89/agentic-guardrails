@@ -12,7 +12,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { fsPath } from "../git/worktree.js";
 import {
@@ -21,6 +21,11 @@ import {
   writeFileAtomic,
   writeReviewArtifact,
 } from "./artifact-writer.js";
+
+// The repository-wide SCOPE_PATTERN self-guard scans the full working tree.
+// Parallel full-suite load can exceed Vitest's 5s default on Windows even
+// though the isolated scan is fast; keep the production path unchanged.
+vi.setConfig({ testTimeout: 30_000 });
 
 const tempDirs: string[] = [];
 

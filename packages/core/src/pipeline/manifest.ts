@@ -23,13 +23,32 @@ import type { Degradation, RunManifest } from "@agentic-guardrails/contracts";
 // `names` — the unused-export usage substrate); same clean-miss rationale.
 export const ENGINE_VERSION = "0.0.3";
 
-/** Version of the deterministic ruleset ("6": Story 1.13 adds the three-rule
- * axiom-6 conformance set — prevalence-gated over the 1.8 structural corpus
- * seed — alongside the 1.9 axiom-1, 1.10 axiom-3, 1.11 axiom-4, and 1.12
- * axiom-5 sets). ENGINE_VERSION stays at 0.0.3 on purpose: 1.13 changes no
- * cached payload schema — RULESET_VERSION alone invalidates the findings
- * cache. */
-export const RULESET_VERSION = "6";
+/** Per-axiom versions of the deterministic rules. Bump only the axiom whose
+ * rule behavior changed: each findings-cache key consumes only its own entry.
+ * ENGINE_VERSION remains the global invalidator for cached-payload SHAPE
+ * changes. Each entry preserves the global version recorded when that
+ * analyzer's current rules landed; adopting the serialized map intentionally
+ * cold-starts the old scalar cache once. Keep keys in numeric order because
+ * the serialized map is persisted. */
+export const RULESET_VERSIONS: Readonly<Record<string, string>> = Object.freeze({
+  "1": "2",
+  "3": "3",
+  "4": "4",
+  "5": "5",
+  "6": "6",
+});
+
+/** Canonical manifest/run-identity representation; the contract remains a
+ * string so existing artifacts need no schema migration. */
+export const RULESET_VERSIONS_MANIFEST = JSON.stringify(RULESET_VERSIONS);
+
+/** Internal test/custom analyzers are allowed outside the shipped map. They
+ * retain conservative global invalidation until promoted into the map. */
+export function rulesetVersionFor(axiom: string): string {
+  return Object.hasOwn(RULESET_VERSIONS, axiom)
+    ? RULESET_VERSIONS[axiom]!
+    : RULESET_VERSIONS_MANIFEST;
+}
 
 /** sha256 of the empty string — the sentinel for "this input does not exist yet". */
 export const ABSENT_SHA256 = createHash("sha256").update("").digest("hex");
@@ -87,7 +106,7 @@ export function buildRunManifest(options: BuildRunManifestOptions = {}): BuiltMa
     ledgerHash: options.ledgerHash ?? ABSENT_SHA256,
     corpusHash: options.corpusHash ?? ABSENT_SHA256,
     ...(options.corpusSeedHash === undefined ? {} : { corpusSeedHash: options.corpusSeedHash }),
-    rulesetVersion: RULESET_VERSION,
+    rulesetVersion: RULESET_VERSIONS_MANIFEST,
     tierEnablement: { deterministic: true, llm: false },
     engineVersion: ENGINE_VERSION,
     ...(options.configHash === undefined ? {} : { configHash: options.configHash }),

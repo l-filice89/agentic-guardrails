@@ -318,6 +318,7 @@ describe("changeSetFor", () => {
     const dir = scopeRepo();
     // Present in the committed tree, in the branch diff, and uncommitted.
     write(dir, "_agentic-guardrails/reviews/project/0000000000000000.json", "{}\n");
+    write(dir, "_AGENTIC-GUARDRAILS/reviews/project/case.json", "{}\n");
     const scopes: ResolvedScope[] = [
       scopeOf(dir, { kind: "uncommitted" }),
       scopeOf(dir, { kind: "project" }),
@@ -331,6 +332,10 @@ describe("changeSetFor", () => {
       const own = (file: string): boolean => file.startsWith("_agentic-guardrails/");
       expect(changed.value.files.filter(own)).toEqual([]);
       expect(changed.value.deleted.filter(own)).toEqual([]);
+      const caseVariant = changed.value.files.includes(
+        "_AGENTIC-GUARDRAILS/reviews/project/case.json",
+      );
+      expect(caseVariant).toBe(!(process.platform === "win32" || process.platform === "darwin"));
     }
   });
 

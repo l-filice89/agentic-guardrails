@@ -283,7 +283,8 @@ export function changeSetFor(
 ): GitResult<ChangeSet> {
   const produced = produce(scope, analyzeRoot);
   if (!produced.ok) return produced;
-  const mine = (file: string): boolean => !file.startsWith(EXCLUDED_PREFIX);
+  const isEngineOutput = excludedBy([EXCLUDED_PREFIX]);
+  const mine = (file: string): boolean => !isEngineOutput(file);
   // Per-prefix matchers so the declaration can name the prefixes that
   // ACTUALLY matched files this run — interpolating the whole configured
   // list would bloat the line and name prefixes that did nothing.
@@ -377,8 +378,8 @@ export function changeSizeFor(
     return { ok: true, value: { changedLines: 0, binaryFiles: [], degradations: [] } };
   }
   const isExcluded = excludedBy(exclude);
-  const mineForSize = (file: string): boolean =>
-    !file.startsWith(EXCLUDED_PREFIX) && !isExcluded(file);
+  const isEngineOutput = excludedBy([EXCLUDED_PREFIX]);
+  const mineForSize = (file: string): boolean => !isEngineOutput(file) && !isExcluded(file);
   const degradations: Degradation[] = [];
   const declareBinary = (files: readonly string[]): void => {
     if (files.length === 0) return;

@@ -16,7 +16,7 @@
     "enclosingSymbol": "decide"
   },
   {
-    "findingId": "a973b6cd83f0caa1b8d161e5cd7ef6f56b1565a39fd16fa081528959ff096830",
+    "findingId": "43578b953b9317d131276af3eed05a05d6ac08ef7941f1c2d292fc422cb0884a",
     "axiom": "3",
     "ruleId": "cleanliness/duplicate-code",
     "location": {
@@ -29,7 +29,7 @@
     "source": "ast",
     "confidence": 1,
     "severity": "warning",
-    "enclosingSymbol": "e1edd2757f67cb76a4f62873c26e414a4f8f6d05b35f47316bdc7df089ad9d4c:src/dup-a.ts:src/dup-b.ts"
+    "enclosingSymbol": "e1edd2757f67cb76a4f62873c26e414a4f8f6d05b35f47316bdc7df089ad9d4c:src/dup-a.ts#0:src/dup-b.ts#0"
   },
   {
     "findingId": "5963e6c47d7085af475394c387e0cf0dc85f8e1086468d66d493124fe65491e9",

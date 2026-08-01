@@ -117,6 +117,14 @@ warnings: [oversized] # accepted, not split: adapter usage-index + four rules ar
 
 Rejected: "orphaned `entryPath` local in pipeline-hardening e2e" — the local is read at line 159 (recomputed-entry assertion); deleting it would break the test.
 
+### 2026-08-01 — Independent follow-up review pass (stamp consumed)
+- reviewed_range: e617868b..0187a712, verified against HEAD
+- forced_areas: the blocking hoisted-declaration false positive remains fixed; graph-name payload invalidation and the shared acquire seam still hold.
+- findings_fixed_and_verified_at_HEAD:
+  - audit_note: The bullets below preserve each original defect statement for audit continuity; they are fixed, not current findings. The adjacent remediation evidence names the HEAD verification surface.
+  - remediation_evidence: `packages/core/src/analyzers/axiom3-cleanliness.test.ts` and `packages/core/src/pipeline/merge.test.ts`; focused regression suite passed 2026-08-01.
+  - [medium] packages/core/src/analyzers/axiom3-cleanliness.ts:431-433 — duplicate findings are keyed by `structureHash + original FILE + duplicate FILE`, not occurrence identities. When one file contains three or more structurally identical functions, every same-file pair has the same discriminator and all but the first are dropped; with repeated copies across files, different pairs anchored at the same later occurrence are subsequently merged by the pipeline. The rule and docs promise “one finding per duplicate pair,” but the implementation reports at most one same-file pair per structure and can omit which occurrences duplicate which originals. Add occurrence ordinals/lines to the pair key while keeping the persisted findingId line-free, or document the intentional collapse.
+
 ## Design Notes
 
 - Unused-export rides the graph pass because the adapter already visits every import declaration — recording bound names is marginal cost; a per-symbol findReferences sweep would be O(project) per export (the SPIKE-3 anti-pattern). The zero-importer exemption trades missed orphan modules for zero entry-point false positives — SPIKE-4 (1.17) will measure whether the trade holds.

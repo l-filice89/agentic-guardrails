@@ -109,6 +109,14 @@ describe("findingSchema", () => {
         confidence: 0.7,
       }).success,
     ).toBe(true);
+    expect(
+      findingSchema.safeParse({
+        ...validFinding,
+        tier: "inferred",
+        source: "llm",
+        confidence: 0,
+      }).success,
+    ).toBe(false);
   });
 
   it("rejects inverted line ranges and unknown keys (strict)", () => {
@@ -183,6 +191,17 @@ describe("partialResult", () => {
     const schema = partialResult(z.unknown());
     expect(
       schema.safeParse({ data: null, coverage: 1, degraded: [{ reason: "x" }] }).success,
+    ).toBe(false);
+  });
+
+  it("rejects unknown degradation keys instead of stripping shape drift", () => {
+    const schema = partialResult(z.unknown());
+    expect(
+      schema.safeParse({
+        data: null,
+        coverage: 1,
+        degraded: [{ reason: "x", subject: "y", typo: true }],
+      }).success,
     ).toBe(false);
   });
 });

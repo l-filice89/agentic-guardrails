@@ -123,6 +123,14 @@ warnings: [oversized] # accepted, not split: prevalence engine + three rules + n
 
 Rejected: excluding renamed-from paths from the corpus vote — a single stale path cannot move a 10-sample 80% threshold, and removing it would weaken the evidence against the rename it is meant to judge. (The enclosingSymbol-carries-a-taxonomy-label finding duplicates an existing ledger entry from 1.11 and was not re-filed.)
 
+### 2026-08-01 — Independent follow-up review pass (stamp consumed)
+- reviewed_range: 195a8e58..80712749, verified against HEAD
+- forced_areas: judged-vs-voter split, analyzer-declared exit-neutrality, and visible no-corpus output remain intact.
+- findings_fixed_and_verified_at_HEAD:
+  - audit_note: The bullets below preserve each original defect statement for audit continuity; they are fixed, not current findings. The adjacent remediation evidence names the HEAD verification surface.
+  - remediation_evidence: `packages/core/src/analyzers/axiom6-conformance.test.ts`; focused regression suite passed 2026-08-01.
+  - [high] packages/core/src/analyzers/axiom6-conformance.ts:131-139,202 — the consumer discards the seed's persisted `degraded[]` and reports corpus degradation only when `coverage < 1`. The producer can legitimately emit a degradation with `coverage === 1` — for example `TypeScriptAdapter` records `resolved outside project root` while counting that import attempt as resolved — and `partialResult` explicitly permits full coverage with degradations. Such a seed is schema-valid, but axiom 6 silently confirms naming/placement conventions from it and returns no corpus degradation. Thread `parsed.data.degraded` through the consumer regardless of coverage; the percentage line can remain conditional.
+
 ## Design Notes
 
 - The seed (not the live graph) is the corpus of record even though the analyzer could re-derive it: the seed is the declared corpus artifact, re-deriving it would make the AC-mandated `no_corpus` path dead code, and reading a whole-repo snapshot costs one file read instead of an O(project) parse.

@@ -60,7 +60,10 @@ export function mergeFindings(findings: readonly Finding[]): Finding[] {
     let start = group[0]!.location.startLine;
     let end = group[0]!.location.endLine;
     for (const finding of group.slice(1)) {
-      if (majorityOverlap(start, end, finding.location.startLine, finding.location.endLine)) {
+      if (
+        contributesNewSource(cluster, finding) &&
+        majorityOverlap(start, end, finding.location.startLine, finding.location.endLine)
+      ) {
         cluster.push(finding);
         end = Math.max(end, finding.location.endLine); // start is already minimal (sorted)
       } else {
@@ -73,6 +76,18 @@ export function mergeFindings(findings: readonly Finding[]): Finding[] {
     out.push(materialize(cluster, start, end));
   }
   return out; // the pipeline re-sorts into artifact order afterwards
+}
+
+/** FR-21 merges corroborating sources. Two distinct findings emitted by the
+ * same source remain distinct even when they share an anchor (for example,
+ * two duplicate-code pairs ending at the same function). */
+function contributesNewSource(cluster: readonly Finding[], candidate: Finding): boolean {
+  if (candidate.ruleId !== "cleanliness/duplicate-code") return true;
+  const existing = new Set(
+    cluster.flatMap((finding) => (Array.isArray(finding.source) ? finding.source : [finding.source])),
+  );
+  const incoming = Array.isArray(candidate.source) ? candidate.source : [candidate.source];
+  return incoming.some((source) => !existing.has(source));
 }
 
 /** >50% of the SMALLER range's line count overlaps the other (strict). */

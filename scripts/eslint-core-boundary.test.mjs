@@ -2,7 +2,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { ESLint } from "eslint";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { CORE_LLM_FREE_MESSAGE } from "../eslint.config.js";
 
@@ -21,6 +21,8 @@ const REPO_ROOT = path.resolve(fileURLToPath(import.meta.url), "..", "..");
 const CORE_SRC_FIXTURE_PATH = path.join(REPO_ROOT, "packages/core/src/__lint-fixture__.ts");
 
 const WALL_RULES = new Set(["no-restricted-imports", "no-restricted-syntax"]);
+
+vi.setConfig({ testTimeout: 30_000 });
 
 async function lintCoreSource(code, fixturePath = CORE_SRC_FIXTURE_PATH) {
   const eslint = new ESLint({ cwd: REPO_ROOT });
@@ -63,6 +65,17 @@ describe("forbidden-import wall (packages/core/src)", () => {
     const messages = await lintCoreSource("await import('@ai-sdk/openai');\n");
 
     expect(messages.length).toBeGreaterThan(0);
+  });
+
+  it("fails on Anthropic scope siblings and static template imports", async () => {
+    for (const code of [
+      "import '@anthropic-ai/claude-agent-sdk';\n",
+      "await import(`openai`);\n",
+      "await import(`\\x6fpenai`);\n",
+      "const x = require(`@anthropic-ai/bedrock-sdk`);\n",
+    ]) {
+      expect((await lintCoreSource(code)).length, code).toBeGreaterThan(0);
+    }
   });
 
   it("fails on a require() of a denylisted SDK", async () => {

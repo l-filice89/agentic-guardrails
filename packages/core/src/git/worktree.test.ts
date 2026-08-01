@@ -27,6 +27,7 @@ import { degradationSchema } from "@agentic-guardrails/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  baseDirLengthProblem,
   fromManifestDegradation,
   LIVE_MARKER_NAME,
   MAX_BASE_PATH_LENGTH,
@@ -172,20 +173,28 @@ describe("withWorktree", () => {
         (created) => {
           expect(existsSync(created)).toBe(true);
           rmSync(path.join(repoRoot, ".git"), { recursive: true, force: true, maxRetries: 5 });
-          throw new Error("callback boom");
+          throw "callback boom";
         },
       );
     } catch (error) {
       thrown = error;
     }
 
-    expect((thrown as Error).message).toBe("callback boom");
+    expect((thrown as Error).message).toContain("non-Error value: callback boom");
+    expect((thrown as Error).cause).toBe("callback boom");
     const degradations = worktreeDegradationsOf(thrown);
     const removal = degradations.find((d) => d.kind === "removal-failed");
     expect(removal).toBeDefined();
     // The caller can NAME the residue, which is the whole point.
     expect(removal?.subject).toMatch(new RegExp(WORKTREE_PREFIX));
     expect(removal?.reason).toMatch(/registry unreadable|not removed/);
+  });
+
+  it("applies the conservative base-length gate only on Windows", () => {
+    const long = "x".repeat(MAX_BASE_PATH_LENGTH + 1);
+    expect(baseDirLengthProblem(long, "win32")).toMatch(/long base on Windows/);
+    expect(baseDirLengthProblem(long, "linux")).toBeUndefined();
+    expect(baseDirLengthProblem(long, "darwin")).toBeUndefined();
   });
 
   it("reports no degradations on an error that carries none", () => {

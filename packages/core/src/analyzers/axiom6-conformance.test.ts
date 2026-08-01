@@ -645,6 +645,22 @@ describe("a partial corpus census", () => {
   });
 });
 
+describe("seed degradation propagation", () => {
+  it("surfaces producer degradation even when coverage is full", async () => {
+    const marker = { reason: "fallback parser used", subject: "src/core/thing-1.ts" };
+    const seed = `${JSON.stringify({
+      schemaVersion: 1,
+      entities: KEBAB_CORPUS.map((file) => ({ file, fanIn: 1, external: false })),
+      coverage: 1,
+      degraded: [marker],
+    })}\n`;
+    const result = await axiom6Conformance.run(
+      fixture({ seed, changed: ["src/core/MyNewFile.ts"] }),
+    );
+    expect(result.degraded).toContainEqual(marker);
+  });
+});
+
 describe("determinism", () => {
   it("identical input yields byte-identical findings", async () => {
     const build = () =>

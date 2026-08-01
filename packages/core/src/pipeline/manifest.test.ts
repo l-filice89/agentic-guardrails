@@ -1,7 +1,13 @@
 import { runManifestSchema } from "@agentic-guardrails/contracts";
 import { describe, expect, it } from "vitest";
 
-import { ABSENT_SHA256, buildRunManifest } from "./manifest.js";
+import {
+  ABSENT_SHA256,
+  buildRunManifest,
+  rulesetVersionFor,
+  RULESET_VERSIONS,
+  RULESET_VERSIONS_MANIFEST,
+} from "./manifest.js";
 
 describe("buildRunManifest", () => {
   it("produces a schema-valid manifest with deterministic tier only", () => {
@@ -10,6 +16,17 @@ describe("buildRunManifest", () => {
     expect(parsed.success).toBe(true);
     expect(manifest.tierEnablement).toEqual({ deterministic: true, llm: false });
     expect(manifest.modelIdentity).toBeUndefined();
+  });
+
+  it("records deterministic per-axiom rule versions in canonical form", () => {
+    expect(RULESET_VERSIONS).toEqual({ "1": "2", "3": "3", "4": "4", "5": "5", "6": "6" });
+    expect(buildRunManifest().manifest.rulesetVersion).toBe(RULESET_VERSIONS_MANIFEST);
+    expect(JSON.parse(RULESET_VERSIONS_MANIFEST)).toEqual(RULESET_VERSIONS);
+    expect(rulesetVersionFor("5")).toBe("5");
+    // Injected test analyzers remain safe: any shipped-map change invalidates
+    // their cache until they become a registered, independently versioned axiom.
+    expect(rulesetVersionFor("99")).toBe(RULESET_VERSIONS_MANIFEST);
+    expect(rulesetVersionFor("toString")).toBe(RULESET_VERSIONS_MANIFEST);
   });
 
   it("uses the empty-string sha256 sentinel for absent ledger and corpus (uninitialized)", () => {

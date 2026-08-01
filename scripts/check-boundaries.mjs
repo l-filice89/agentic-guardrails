@@ -50,7 +50,12 @@ export const LLM_SDK_DENYLIST = [
 ];
 
 /** Whole npm scopes that are LLM SDK families. */
-export const LLM_SDK_SCOPE_PREFIXES = ["@ai-sdk/", "@langchain/", "@openrouter/"];
+export const LLM_SDK_SCOPE_PREFIXES = [
+  "@ai-sdk/",
+  "@anthropic-ai/",
+  "@langchain/",
+  "@openrouter/",
+];
 
 /**
  * Permitted `@agentic-guardrails/*` dependencies per workspace package

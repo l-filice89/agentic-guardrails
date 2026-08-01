@@ -242,6 +242,19 @@ describe("runInit — never-clobber (idempotent re-run)", () => {
       "existing config.yaml is invalid — review will exit 2",
     );
   });
+
+  it("warns without clobbering invalid existing knowledge files", async () => {
+    const dir = makeRepo();
+    expect((await runInit({ cwd: dir, noInput: true })).ok).toBe(true);
+    writeFileSync(out(dir, "conventions.yaml"), "schemaVersion: nope\n");
+    writeFileSync(out(dir, "corpus-map.yaml"), "not: [valid\n");
+    const result = await runInit({ cwd: dir, noInput: true });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.warnings.join("\n")).toContain("existing conventions.yaml is invalid");
+    expect(result.warnings.join("\n")).toContain("existing corpus-map.yaml is invalid");
+    expect(readFileSync(out(dir, "conventions.yaml"), "utf8")).toBe("schemaVersion: nope\n");
+  });
 });
 
 describe("checkGitWiring (preflight predicate)", () => {
@@ -257,6 +270,13 @@ describe("checkGitWiring (preflight predicate)", () => {
     const dir = makeRepo();
     writeFileSync(path.join(dir, "_agentic-guardrails"), "not a directory\n");
     expect(checkGitWiring(dir)).toEqual([]);
+  });
+
+  it("treats seeded history files as init markers", () => {
+    const dir = makeRepo();
+    mkdirSync(path.join(dir, "_agentic-guardrails", "history"), { recursive: true });
+    writeFileSync(out(dir, "history/trends.jsonl"), "");
+    expect(checkGitWiring(dir).join("\n")).toContain(".gitattributes");
   });
 
   it("each missing seeded .gitignore line gets its own warning naming its consequence", async () => {

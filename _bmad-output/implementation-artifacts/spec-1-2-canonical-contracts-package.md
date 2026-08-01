@@ -115,6 +115,16 @@ warnings: [oversized]
 
 Rejected: envelope factory arity drift vs spec task text (harmless, shape is per-ADR); empty-string identity fields in `computeFindingId` (typed-string inputs, internal callers from 1.4+; a throw would violate the never-throw boundary); duplicated tsup dts workaround across two packages (Rule of Three — extract when a third package appears); ADR-005 phrasing nit. Process note (fixed in the harness, not the artifact): the review diff omitted untracked files — future review diffs include them.
 
+### 2026-07-31 — Independent follow-up review pass (stamp consumed)
+- reviewed_range: 20460ade..1fb9253a, verified against HEAD
+- revalidated: 2026-08-01 — both retained findings reproduced through the built contracts package; the prior untyped-caller migration note was removed as non-actionable for supported callers
+- findings_fixed_and_verified_at_HEAD:
+  - audit_note: The bullets below preserve each original defect statement for audit continuity; they are fixed, not current findings. The adjacent remediation evidence names the HEAD verification surface.
+  - remediation_evidence: `packages/contracts/src/index.test.ts`; focused regression suite passed 2026-08-01.
+  - [low] packages/contracts/src/partial-result.ts:7 — `degradationSchema` is plain `z.object`, so unknown keys inside degradation entries are silently stripped even though every enclosing schema (`findingSchema`, `partialResult` wrapper) is `strictObject`; contradicts the story's own "shape drift must fail parse, never strip silently" invariant (patched for everything else in the first review pass).
+  - [low] packages/contracts/src/finding.ts:67 — inferred-tier confidence `0` parses (`z.number().min(0)`, `superRefine` only constrains the deterministic branch) while the schema JSDoc pins inferred confidence to "(0..1]"; a zero-confidence LLM finding is doc-invalid but schema-valid.
+- notes: axiom-5 "security" vs "type-system integrity" doc contradiction in config.ts was fixed by the 1.6 rewrite; `{...raw}` spread is prototype-pollution-safe (own-property define + strict schemas reject `__proto__` keys); no high or medium findings survive at HEAD.
+
 ## Design Notes
 
 - `computeFindingId` deliberately excludes location line numbers; `enclosingSymbol` (or a normalized context string when no symbol exists) is the drift-stable anchor. Callers in 1.4+ supply it from the AST.

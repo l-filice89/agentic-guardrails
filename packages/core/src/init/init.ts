@@ -12,10 +12,15 @@
  * content preserved verbatim. The seed is a regenerable derivation and is
  * rewritten every run. No `--force` mode exists on purpose.
  */
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
-import { configSchema, enforcementSchema } from "@agentic-guardrails/contracts";
+import {
+  configSchema,
+  conventionsFileSchema,
+  corpusMapFileSchema,
+  enforcementSchema,
+} from "@agentic-guardrails/contracts";
 import { parse as parseYaml } from "yaml";
 
 import { TypeScriptAdapter } from "../adapter/typescript-adapter.js";
@@ -166,13 +171,25 @@ export async function runInit(options: RunInitOptions): Promise<InitResult> {
 
   // Empty-but-valid committed knowledge files (full semantics are Epic 4).
   try {
-    for (const [name, content] of [
-      ["conventions.yaml", CONVENTIONS_YAML],
-      ["corpus-map.yaml", CORPUS_MAP_YAML],
+    for (const [name, content, schema] of [
+      ["conventions.yaml", CONVENTIONS_YAML, conventionsFileSchema],
+      ["corpus-map.yaml", CORPUS_MAP_YAML, corpusMapFileSchema],
     ] as const) {
       const filePath = path.join(outRoot, name);
       if (existsSync(filePath)) {
         kept.push(`_agentic-guardrails/${name}`);
+        try {
+          const parsed = schema.safeParse(parseYaml(readFileSync(filePath, "utf8")));
+          if (!parsed.success) {
+            const issue = parsed.error.issues[0];
+            warnings.push(
+              `existing ${name} is invalid — review will declare degraded input (${issue?.message ?? "unknown schema error"})`,
+            );
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          warnings.push(`existing ${name} is invalid — review will declare degraded input (${message})`);
+        }
       } else {
         writeFileAtomic(filePath, content);
         created.push(`_agentic-guardrails/${name}`);

@@ -166,8 +166,14 @@ function write(
     appended.value.skipped > 0
       ? ` (${appended.value.skipped} already recorded)`
       : "";
+  const declarations = (
+    appended.value as typeof appended.value & { declarations?: string[] }
+  ).declarations;
   return {
-    lines: [`${summary}${skipped}: ${DISPOSITIONS_PATH}`],
+    lines: [
+      `${summary}${skipped}: ${DISPOSITIONS_PATH}`,
+      ...(declarations ?? []).map((declaration) => `declaration: ${declaration}`),
+    ],
     recorded: appended.value.appended,
   };
 }

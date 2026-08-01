@@ -108,6 +108,16 @@ warnings: []
 
 Rejected: duplicated `PartialResultOf<T>` structural type in core vs contracts schema (canonical schema stays in contracts; core's direct zod dep is version-aligned via pnpm — re-exporting `z` from contracts would be worse coupling); stringly `degraded.subject` ("file -> specifier") convention (contracts schema is reason+subject by design; revisit only if a consumer needs structured fields). Golden-file audit trail: edge list hand-audited twice (implementation report + orchestrator check against fixture source) this pass.
 
+### 2026-07-31 — Independent follow-up review pass (stamp consumed)
+- reviewed_range: bae98087..3d01ac73, verified against HEAD
+- revalidated: 2026-08-01 — retained findings follow reachable valid syntax; invalid-TS and cross-drive-only notes were removed as poor review signal
+- findings_fixed_and_verified_at_HEAD:
+  - audit_note: The bullets below preserve each original defect statement for audit continuity; they are fixed, not current findings. The adjacent remediation evidence names the HEAD verification surface.
+  - remediation_evidence: `packages/core/src/adapter/typescript-adapter.test.ts`; focused regression suite passed 2026-08-01.
+  - [low] packages/core/src/adapter/typescript-adapter.ts:282 — a dynamic `import()`/`require()` whose argument is a no-substitution template literal (or a parenthesized string literal) is statically knowable but fails the `StringLiteral` kind check → classed "non-literal", producing a false degradation + coverage loss instead of an edge. Typed degradation, not silent, so contract-preserving but imprecise.
+  - [low] packages/core/src/adapter/typescript-adapter.ts:279 — any call whose callee is an identifier named `require` (user-defined/shadowed function, non-CJS context) is treated as CommonJS require → phantom edge or false degradation.
+- no high or medium findings still present at HEAD; all 12 previously patched findings verified fixed.
+
 ## Design Notes
 
 - The fixture project gets its own `tsconfig.json` but is **excluded** from the workspace typecheck (`tsc -b` references) — it is data, not source. Ensure eslint ignores `tests/__fixtures__/**` (config currently ignores `tests/**` globally — keep it that way).

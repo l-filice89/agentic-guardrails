@@ -50,6 +50,14 @@ const FORBIDDEN_DYNAMIC_IMPORT_SELECTORS = [
     selector: `CallExpression[callee.name="require"] > Literal[value=/^(${DENIED_SOURCE_REGEX})$/]`,
     message: CORE_LLM_FREE_MESSAGE,
   },
+  {
+    selector: `ImportExpression > TemplateLiteral[expressions.length=0] > TemplateElement[value.cooked=/^(${DENIED_SOURCE_REGEX})$/]`,
+    message: CORE_LLM_FREE_MESSAGE,
+  },
+  {
+    selector: `CallExpression[callee.name="require"] > TemplateLiteral[expressions.length=0] > TemplateElement[value.cooked=/^(${DENIED_SOURCE_REGEX})$/]`,
+    message: CORE_LLM_FREE_MESSAGE,
+  },
 ];
 
 export default tseslint.config(

@@ -10,6 +10,13 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Epic 1 deferred-work sweep: all 11 ledger entries now have a terminal
+  disposition. Per-axiom `RULESET_VERSIONS` replaces the global ruleset cache
+  invalidator; manifests retain schema compatibility by recording the
+  canonical serialized map. Three knowledge/evidence concerns are assigned
+  as acceptance criteria to Stories 4.1, 4.2, and 4.5; Windows automation is
+  assigned to Story 5.4. Three obsolete or unsupported proposals are
+  discarded with evidence and reopen triggers in the ledger.
 - SPIKE-1 — structured-output prototype, the M1 signal (Story 1.19,
   `docs/spikes/SPIKE-1-structured-output.md` + raw results
   `docs/spikes/SPIKE-1-results.json`): **PASS** — 50 genuine headless
@@ -689,6 +696,12 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   "uncategorized".
 
 ### Fixed
+- Epic 1 follow-up review remediation: fixed all 29 retained findings across
+  boundaries/contracts, adapter/analyzer precision, timeout and cache
+  degradation, run identity/config/init truth, worktree/scope isolation,
+  concurrent disposition resolution, and CI least privilege/immutable action
+  references. Added focused regression tests and revalidated all 17 story
+  records.
 - Docs/README/rule-doc wording: "the ONE axiom that defaults to blocking"
   was false — `EFFECTIVE_DEFAULTS` makes EVERY axiom blocking by default;
   axiom 5's distinction is FR-32 naming it plus its error-dense rule set.

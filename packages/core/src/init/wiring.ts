@@ -21,7 +21,13 @@ export const CACHE_IGNORE_LINE = ".cache/";
 /** Committed marker files whose presence means "this repo ran `init`" —
  * the artifact writer auto-creates the folder (+ .gitignore) on demand
  * during any review, so the folder alone proves nothing. */
-const INIT_MARKER_FILES = ["config.yaml", "conventions.yaml", "corpus-map.yaml"];
+const INIT_MARKER_FILES = [
+  "config.yaml",
+  "conventions.yaml",
+  "corpus-map.yaml",
+  "history/trends.jsonl",
+  "history/dispositions.jsonl",
+];
 
 /** Per-line consequence named in the missing-`.gitignore`-line warnings. */
 const IGNORE_LINE_CONSEQUENCE: Record<string, string> = {

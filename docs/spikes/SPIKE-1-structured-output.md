@@ -86,12 +86,14 @@ output feeds any measured number.
 | Findings produced | 125 total (1–3 per sample, all strict-schema-valid) |
 | Per-invocation wall clock | median 39.2 s (min 15.7 s, max 120.6 s) |
 
-Every output validated on the first `safeParse`: correct strict-object
-shapes, no unknown keys, no markdown fences, `tier: "inferred"` /
-`source: "llm"` / confidence in (0..1] consistent with the schema's
-cross-field refinements, and 1-based inclusive line ranges. The failure modes
-the ladder exists for (malformed JSON, hallucinated fields) did not occur in
-50 real invocations.
+Every output passed the first `safeParse`, producing 125 accepted findings
+with 1-based inclusive ranges. The successful raw payloads were not retained,
+so the committed results corroborate validation outcomes and finding counts,
+not direct inspection of per-finding confidence values or markdown-fence
+absence. The prompt requested those shapes; treating that request as retained
+measurement evidence would overstate the data. The failure modes the ladder
+exists for (malformed JSON, hallucinated fields) did not occur in 50 recorded
+invocations.
 
 ## Self-test (stub invoker, no LLM) — ran before any paid invocation
 

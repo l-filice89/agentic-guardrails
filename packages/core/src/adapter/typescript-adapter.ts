@@ -9,6 +9,7 @@ import path from "node:path";
 
 import type { Degradation } from "@agentic-guardrails/contracts";
 import {
+  Node,
   Project,
   SyntaxKind,
   ts,
@@ -62,6 +63,33 @@ function matchesPathsAlias(specifier: string, patterns: readonly string[]): bool
 const NODE_BUILTINS = new Set(builtinModules);
 function isNodeBuiltin(specifier: string): boolean {
   return specifier.startsWith("node:") || NODE_BUILTINS.has(specifier);
+}
+
+const CODE_EXTENSIONS = new Set([
+  ".cjs",
+  ".cts",
+  ".js",
+  ".json",
+  ".jsx",
+  ".mjs",
+  ".mts",
+  ".node",
+  ".ts",
+  ".tsx",
+]);
+
+/** Relative imports handled by a bundler/plugin rather than TypeScript
+ * (styles, images, `?raw`, and similar) are valid external edges. They must
+ * not become blocking unresolved-code findings. */
+function isBundlerAssetSpecifier(specifier: string, queryTargetResolved: boolean): boolean {
+  const marker = specifier.search(/[?#]/);
+  const pathname = marker === -1 ? specifier : specifier.slice(0, marker);
+  const extension = path.extname(pathname).toLowerCase();
+  // Asset extensions may be relative, absolute, bare package subpaths, or
+  // tsconfig aliases. Query/hash imports are external only when the target
+  // beneath the suffix resolves; `./missing.ts?x` remains an unresolved edge.
+  return (extension !== "" && !CODE_EXTENSIONS.has(extension)) ||
+    (marker !== -1 && queryTargetResolved);
 }
 
 function compareStrings(a: string, b: string): number {
@@ -180,6 +208,18 @@ export class TypeScriptAdapter implements LanguageAdapter {
         edges.push({ from, to: specifier, ...flags, line, names });
         return;
       }
+      const marker = specifier.search(/[?#]/);
+      const sourceFile = project.getSourceFile(path.resolve(rootDir, from));
+      const queryTargetResolved =
+        marker !== -1 &&
+        sourceFile !== undefined &&
+        resolveWithCompiler(project, sourceFile, specifier.slice(0, marker)) !== undefined;
+      if (isBundlerAssetSpecifier(specifier, queryTargetResolved)) {
+        attempt(from, specifier, true);
+        nodes.push({ file: specifier, external: true });
+        edges.push({ from, to: specifier, ...flags, line, names });
+        return;
+      }
       if (resolvedAbsolutePath !== undefined) {
         const rel = toRel(resolvedAbsolutePath);
         if (rel.includes("node_modules/")) {
@@ -276,11 +316,13 @@ export class TypeScriptAdapter implements LanguageAdapter {
         const callee = call.getExpression();
         const isDynamicImport = callee.getKind() === SyntaxKind.ImportKeyword;
         const isRequire =
-          callee.getKind() === SyntaxKind.Identifier && callee.getText() === "require";
+          Node.isIdentifier(callee) &&
+          callee.getText() === "require" &&
+          !isProjectBinding(callee, rootDir);
         if (!isDynamicImport && !isRequire) continue;
         const arg = call.getArguments()[0];
-        if (arg !== undefined && arg.isKind(SyntaxKind.StringLiteral)) {
-          const specifier = arg.getLiteralValue();
+        const specifier = literalSpecifier(arg);
+        if (specifier !== undefined) {
           record(
             from,
             specifier,
@@ -315,6 +357,32 @@ export class TypeScriptAdapter implements LanguageAdapter {
       degraded: [...degradedByKey.values()],
     };
   }
+}
+
+function literalSpecifier(node: Node | undefined): string | undefined {
+  if (node === undefined) return undefined;
+  if (Node.isStringLiteral(node) || Node.isNoSubstitutionTemplateLiteral(node)) {
+    return node.getLiteralValue();
+  }
+  if (Node.isParenthesizedExpression(node)) return literalSpecifier(node.getExpression());
+  return undefined;
+}
+
+/** A same-project declaration named `require` is application code, not the
+ * CommonJS loader. Node's ambient declaration lives under node_modules and
+ * remains eligible. */
+function isProjectBinding(identifier: Node, rootDir: string): boolean {
+  const declarations = identifier.getSymbol()?.getDeclarations() ?? [];
+  return declarations.some((declaration) => {
+    const relative = normalizePath(path.relative(rootDir, declaration.getSourceFile().getFilePath()));
+    return (
+      relative !== "" &&
+      !relative.startsWith("..") &&
+      !path.isAbsolute(relative) &&
+      relative !== "node_modules" &&
+      !relative.startsWith("node_modules/")
+    );
+  });
 }
 
 /**

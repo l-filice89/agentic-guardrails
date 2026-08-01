@@ -399,6 +399,16 @@ describe("cleanliness/duplicate-code", () => {
     expect(reversed.findings[0]!.location.file).toBe("src/second.ts");
   });
 
+  it("reports every occurrence pair when one file contains three copies", async () => {
+    const third = DUP_B.replace("beta", "gamma");
+    const ctx = fixtureProject({ "src/repeated.ts": `${DUP_A}\n${DUP_B}\n${third}` });
+    const duplicates = (await axiom3Cleanliness.run(ctx)).findings.filter(
+      (finding) => finding.ruleId === "cleanliness/duplicate-code",
+    );
+    expect(duplicates).toHaveLength(3);
+    expect(new Set(duplicates.map((finding) => finding.findingId)).size).toBe(3);
+  });
+
   it("ignores identical SMALL bodies (below the 5-statement floor)", async () => {
     const small = "{\n  const a = 1;\n  const b = a + 1;\n  return b;\n}";
     const ctx = fixtureProject({

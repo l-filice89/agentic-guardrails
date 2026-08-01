@@ -9,7 +9,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 
-import { dispositionRecordSchema } from "@agentic-guardrails/contracts";
+import { dispositionRecordSchema, makeDispositionRecord } from "@agentic-guardrails/contracts";
 
 import { appendDispositions, appendJsonl, readJsonl, TRENDS_PATH } from "./history.js";
 
@@ -273,6 +273,32 @@ describe("appendDispositions — 'latest wins' is a property of the FILE", () =>
     const appended = appendDispositions(file, [...entry("deferred"), ...entry("deferred")]);
     expect(appended).toEqual({ ok: true, value: { appended: 1, skipped: 1, repaired: false } });
     expect(dispositions(file)).toEqual(["deferred"]);
+  });
+
+  it("resolves equal-revision disposition conflicts deterministically and declares them", () => {
+    const file = store();
+    const reversedFile = store();
+    const records = ["actionable", "deferred", "not-actionable"].map((disposition) =>
+      makeDispositionRecord({
+        schemaVersion: 1,
+        key: { runId: "run-1", findingId: "finding-1" },
+        disposition: disposition as "actionable" | "deferred" | "not-actionable",
+        revision: 0,
+      }),
+    );
+    expect(appendJsonl(file, dispositionRecordSchema, records).ok).toBe(true);
+    expect(appendJsonl(reversedFile, dispositionRecordSchema, [...records].reverse()).ok).toBe(true);
+    const winner = [...records].sort((a, b) => a.recordId.localeCompare(b.recordId))[0]!;
+    const result = appendDispositions(file, entry(winner.disposition));
+    const reversed = appendDispositions(reversedFile, entry(winner.disposition));
+    expect(result.ok).toBe(true);
+    expect(reversed.ok).toBe(true);
+    if (!result.ok || !reversed.ok) return;
+    expect(result.value.appended).toBe(0);
+    expect(result.value.declarations?.[0]).toContain("conflicting dispositions at revision 0");
+    expect(result.value.declarations?.[0]).toContain(`selected ${winner.disposition}`);
+    expect(result.value.declarations).toHaveLength(1);
+    expect(reversed.value.declarations).toEqual(result.value.declarations);
   });
 });
 

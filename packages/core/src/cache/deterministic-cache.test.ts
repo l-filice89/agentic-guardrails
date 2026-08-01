@@ -57,6 +57,22 @@ describe("DeterministicCache", () => {
     });
   });
 
+  it("distinguishes an unreadable entry from a clean miss", () => {
+    const root = cacheRoot();
+    const cache = makeCache(root);
+    mkdirSync(path.join(root, "findings", `${KEY}.json`), { recursive: true });
+    const result = cache.get("findings", KEY, schema);
+    expect(result).toMatchObject({ hit: false, invalid: false });
+    expect(!result.hit && result.error).toBeTruthy();
+  });
+
+  it("returns cache write failures to the caller", () => {
+    const root = cacheRoot();
+    writeFileSync(path.join(root, "blocked"), "not a directory");
+    const result = makeCache(path.join(root, "blocked")).put("findings", KEY, { value: 1 });
+    expect(result.ok).toBe(false);
+  });
+
   it("HAZARD: a torn/garbage entry is an invalid miss — never a crash — and put overwrites it", () => {
     const root = cacheRoot();
     const cache = makeCache(root);

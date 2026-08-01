@@ -98,11 +98,11 @@ import {
 import { aggregateTrends, type TrendAggregation } from "../report/trends.js";
 import { ghPrMetadata, type GhRunner } from "./gh-metadata.js";
 import {
-  ABSENT_SHA256,
   buildRunManifest,
   ENGINE_VERSION,
   numericCompare,
-  RULESET_VERSION,
+  rulesetVersionFor,
+  RULESET_VERSIONS_MANIFEST,
 } from "./manifest.js";
 import { mergeFindings } from "./merge.js";
 import {
@@ -212,6 +212,10 @@ export interface AnalyzerResult {
  * bound actually bounds concurrent work. */
 export interface Analyzer {
   axiom: string;
+  /** Stable identity for persistent findings caching when callers inject a
+   * custom analyzer registry. Absent means the custom analyzer is run cold:
+   * an axiom id alone is not enough identity to share shipped cache entries. */
+  cacheVersion?: string;
   run(context: AnalyzerContext): Promise<AnalyzerResult>;
 }
 
@@ -431,12 +435,13 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewRunRes
     ghIdentity = metadata.ok ? metadata.metadata : { unavailable: metadata.degradation.reason };
   }
 
-  // A worktree is created ONLY when the reviewed ref is not the current HEAD.
-  // Checking out a ref that already IS HEAD would silently drop the user's
-  // uncommitted state: "isolated execution" means isolated from a ref
-  // checkout, not isolation for its own sake.
+  // Ref scopes always analyze committed ref bytes in an isolated worktree,
+  // including when the ref resolves to the invoking HEAD. Otherwise dirty
+  // working-tree bytes could be reported under a committed ref identity.
   const worktreeRef =
-    scope.ref !== undefined && !isCurrentHead(outputRoot, scope.ref) ? scope.ref : undefined;
+    (scope.kind === "branch" || scope.kind === "pr") && scope.ref !== undefined
+      ? scope.ref
+      : undefined;
 
   // IN-PLACE DIVERGENCE (declared, never silent). A ref scope analyzed in
   // place — `--branch <current>`, `--project` — takes its CHANGE SET from
@@ -557,9 +562,8 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewRunRes
   let configGitStatus: RunManifest["configGitStatus"];
   if (loaded.configPresent) {
     const status = fileGitStatus(outputRoot, "_agentic-guardrails/config.yaml");
-    // ponytail: a git failure here is near-impossible (repoRoot + status just
-    // succeeded); the field is optional, so it is simply omitted on failure.
     if (status.ok) configGitStatus = status.value;
+    else configWarnings.push(`config git status unavailable: ${firstLine(status.reason)}`);
   } else {
     configGitStatus = "absent";
   }
@@ -653,9 +657,16 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewRunRes
         }),
     ...(prMetadata === undefined ? {} : { pr: prMetadata }),
   });
+  // Composition-only state must participate too. The phase-1 runId cannot
+  // know whether the invoking repo's config is committed, dirty, untracked,
+  // absent, or temporarily unprobeable; all five alter manifest bytes.
+  const composedRunId = createHash("sha256")
+    .update(JSON.stringify([outcome.runId, configGitStatus ?? "unavailable"]))
+    .digest("hex")
+    .slice(0, 16);
   const artifact: ReviewArtifact = {
     schemaVersion: 1,
-    runId: outcome.runId,
+    runId: composedRunId,
     scope: scope.slug,
     changedFiles: outcome.changedFiles,
     deletedFiles: outcome.deletedFiles,
@@ -776,14 +787,6 @@ function countBySeverity(
   return counts;
 }
 
-/** True when `ref` resolves to the commit HEAD is on — the test that decides
- * whether a worktree is needed at all. An unresolvable ref answers "not HEAD"
- * and is caught by the lifecycle's own ref handling. */
-function isCurrentHead(repoRoot: string, ref: string): boolean {
-  const target = revParse(repoRoot, ref);
-  return target.ok && target.value === headSha(repoRoot);
-}
-
 /**
  * One analysis pass over `analyzeRoot` — phases 0 (change set) through 4
  * (aggregation). Runs INSIDE the worktree when there is one; every path it
@@ -843,10 +846,10 @@ async function analyze(inputs: AnalysisInputs): Promise<AnalysisOutcome> {
         .update(readFileSync(fsPath(path.join(analyzeRoot, file))))
         .digest("hex");
     } catch (error) {
-      if (candidates.fromRefs) {
+      if (candidates.fromRefs || !workingTreeReadFailureIsDeletion(error)) {
         const message = error instanceof Error ? error.message : String(error);
         unreadable.push({
-          reason: `changed at the reviewed ref but unreadable: ${firstLine(message)}`,
+          reason: `${candidates.fromRefs ? "changed at the reviewed ref" : "changed in the working tree"} but unreadable: ${firstLine(message)}`,
           subject: file,
         });
       } else {
@@ -881,6 +884,10 @@ async function analyze(inputs: AnalysisInputs): Promise<AnalysisOutcome> {
   const cacheRoot = path.join(outputRoot, "_agentic-guardrails", ".cache");
   const secret = loadCacheSecret(options.cacheSecretPath);
   let cacheDisabled: string | undefined;
+  const disableCache = (reason: string, subject: string): void => {
+    cacheDisabled ??= reason;
+    cacheDegraded.push({ reason, subject });
+  };
   if (secret === undefined) {
     cacheDisabled =
       "cache secret unavailable (could not read or create ~/.agentic-guardrails/cache-secret)";
@@ -927,7 +934,7 @@ async function analyze(inputs: AnalysisInputs): Promise<AnalysisOutcome> {
       const memoized = graphMemo.get(tsconfigPath);
       if (memoized !== undefined) return memoized;
       const key = graphKeys.get(tsconfigPath);
-      if (key !== undefined && cache !== undefined) {
+      if (key !== undefined && cache !== undefined && cacheDisabled === undefined) {
         const read = cache.get("graph", key, cachedGraphSchema);
         if (read.hit) {
           cacheStats.hits += 1;
@@ -942,7 +949,9 @@ async function analyze(inputs: AnalysisInputs): Promise<AnalysisOutcome> {
           graphMemo.set(tsconfigPath, result);
           return result;
         }
-        if (read.invalid) {
+        if (read.error !== undefined) {
+          disableCache(`cache read failed: ${firstLine(read.error)}`, "cache/graph");
+        } else if (read.invalid) {
           cacheStats.invalid += 1;
           cacheDegraded.push({
             reason: "invalid cache entry (recomputed and overwritten)",
@@ -961,10 +970,11 @@ async function analyze(inputs: AnalysisInputs): Promise<AnalysisOutcome> {
       if (
         key !== undefined &&
         cache !== undefined &&
+        cacheDisabled === undefined &&
         !controller.signal.aborted &&
         result.degraded.length === 0
       ) {
-        cache.put("graph", key, {
+        const written = cache.put("graph", key, {
           data: result.data.toJSON(),
           coverage: result.coverage,
           attempted: result.attempted,
@@ -972,6 +982,9 @@ async function analyze(inputs: AnalysisInputs): Promise<AnalysisOutcome> {
           unresolvedImports: result.unresolvedImports,
           degraded: result.degraded,
         });
+        if (!written.ok) {
+          disableCache(`cache write failed: ${firstLine(written.reason)}`, "cache/graph");
+        }
       }
       return result;
     },
@@ -996,9 +1009,15 @@ async function analyze(inputs: AnalysisInputs): Promise<AnalysisOutcome> {
   const corpusSeed = readStructuralSeedFile(outputRoot);
   const seedHash = corpusSeed.ok
     ? createHash("sha256").update(corpusSeed.bytes).digest("hex")
-    : "absent";
-  const findingsKeyFor = (axiom: string): string | undefined => {
+    : corpusSeed.identity;
+  const findingsKeyFor = (analyzer: Analyzer): string | undefined => {
     if (cacheDisabled !== undefined) return undefined;
+    const customRegistry = options.analyzers !== undefined;
+    if (customRegistry && analyzer.cacheVersion === undefined) return undefined;
+    const axiom = analyzer.axiom;
+    const analyzerVersion = customRegistry
+      ? ["custom", analyzer.cacheVersion]
+      : ["shipped", rulesetVersionFor(axiom)];
     return createHash("sha256")
       .update(
         JSON.stringify([
@@ -1015,7 +1034,7 @@ async function analyze(inputs: AnalysisInputs): Promise<AnalysisOutcome> {
           // are different analyses and must not share cache entries.
           scope.slug,
           config.boundaries ?? null,
-          RULESET_VERSION,
+          analyzerVersion,
           ENGINE_VERSION,
           ts.version,
           { deterministic: true, llm: false },
@@ -1063,23 +1082,43 @@ async function analyze(inputs: AnalysisInputs): Promise<AnalysisOutcome> {
     .filter((a) => config.axioms[a.axiom]?.enforcement === "off")
     .map((a) => a.axiom);
   const budgetMs = options.phase1BudgetMs ?? PHASE1_BUDGET_MS;
+  const phase1StartedAt = Date.now();
   const settled = new Map<string, AnalyzerResult>();
   const budgetTimer = setTimeout(() => controller.abort(), budgetMs);
   try {
     await pMap(
       analyzers,
       async (analyzer): Promise<void> => {
-        const key = findingsKeyFor(analyzer.axiom);
-        if (key !== undefined && cache !== undefined) {
+        const key = findingsKeyFor(analyzer);
+        if (key !== undefined && cache !== undefined && cacheDisabled === undefined) {
           const read = cache.get("findings", key, cachedAnalyzerResultSchema);
           if (read.hit) {
             // Hit: skip analyzer execution AND graph build — the cached
             // entry is the identical data a cold run would compute.
             cacheStats.hits += 1;
-            settled.set(analyzer.axiom, read.value);
+            const completedAfterDeadline = Date.now() - phase1StartedAt >= budgetMs;
+            const result = completedAfterDeadline
+              ? {
+                  ...read.value,
+                  degraded: [
+                    ...read.value.degraded,
+                    {
+                      reason: `phase 1 exceeded its ${budgetMs}ms budget — cache hit completed after the deadline`,
+                      subject: `axiom-${analyzer.axiom}`,
+                    },
+                  ],
+                }
+              : read.value;
+            if (completedAfterDeadline) controller.abort();
+            settled.set(analyzer.axiom, result);
             return;
           }
-          if (read.invalid) {
+          if (read.error !== undefined) {
+            disableCache(
+              `cache read failed: ${firstLine(read.error)}`,
+              `cache/findings/axiom-${analyzer.axiom}`,
+            );
+          } else if (read.invalid) {
             cacheStats.invalid += 1;
             cacheDegraded.push({
               reason: "invalid cache entry (recomputed and overwritten)",
@@ -1104,6 +1143,20 @@ async function analyze(inputs: AnalysisInputs): Promise<AnalysisOutcome> {
             ],
           };
         }
+        const completedAfterDeadline = Date.now() - phase1StartedAt > budgetMs;
+        if (completedAfterDeadline) {
+          controller.abort();
+          result = {
+            ...result,
+            degraded: [
+              ...result.degraded,
+              {
+                reason: `phase 1 exceeded its ${budgetMs}ms budget — analyzer completed after the deadline`,
+                subject: `axiom-${analyzer.axiom}`,
+              },
+            ],
+          };
+        }
         settled.set(analyzer.axiom, result);
         // Write-through — but never cache a crash (a transient failure must
         // not become sticky until the next content change), never cache a
@@ -1113,11 +1166,18 @@ async function analyze(inputs: AnalysisInputs): Promise<AnalysisOutcome> {
         if (
           key !== undefined &&
           cache !== undefined &&
+          cacheDisabled === undefined &&
           !crashed &&
           result.degraded.length === 0 &&
           !controller.signal.aborted
         ) {
-          cache.put("findings", key, result);
+          const written = cache.put("findings", key, result);
+          if (!written.ok) {
+            disableCache(
+              `cache write failed: ${firstLine(written.reason)}`,
+              `cache/findings/axiom-${analyzer.axiom}`,
+            );
+          }
         }
       },
       // SPIKE-3 (docs/spikes/SPIKE-3-import-graph-cost.md): sweep {2,4,8} was
@@ -1240,6 +1300,11 @@ async function analyze(inputs: AnalysisInputs): Promise<AnalysisOutcome> {
       fileHashes,
       deletedFiles,
       inputs.loaded.configHash,
+      {
+        ledger: ledger.hash ?? "absent",
+        corpus: corpus.hash ?? "absent",
+        structuralSeed: seedHash,
+      },
       inputs.ghIdentity,
     ),
     phase1: {
@@ -1260,6 +1325,12 @@ async function analyze(inputs: AnalysisInputs): Promise<AnalysisOutcome> {
     axiomsOff,
     registeredAxioms: registered.map((a) => a.axiom),
   };
+}
+
+/** Only absence means a working-tree candidate was deleted. Permission,
+ * locking, path-type, and other read failures are lost coverage. */
+export function workingTreeReadFailureIsDeletion(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException | null)?.code === "ENOENT";
 }
 
 /**
@@ -1283,10 +1354,10 @@ function hashKnowledgeFile(
     bytes = readFileSync(path.join(root, relPath));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
-    const message = error instanceof Error ? error.message : String(error);
+    const code = (error as NodeJS.ErrnoException | null)?.code ?? "UNKNOWN";
     return {
-      hash: ABSENT_SHA256,
-      degradation: { reason: `${name} unreadable: ${firstLine(message)}`, subject },
+      hash: createHash("sha256").update(`unreadable:${code}`).digest("hex"),
+      degradation: { reason: `${name} unreadable: ${code}`, subject },
     };
   }
   const hash = createHash("sha256").update(bytes).digest("hex");
@@ -1400,10 +1471,11 @@ export function discoverTsconfigs(root: string): TsconfigDiscovery {
  * the reviewed ref's commit for a worktree scope, empty-tree sentinel before
  * the first commit — sorted changed paths + their content hashes as snapped
  * before phase 1, deleted uncommitted paths, root tsconfig content hash,
- * config.yaml content hash — literal "absent" sentinel when absent — ruleset
- * version, engine version, and — only when there is one — the `gh` metadata
- * outcome), truncated to 16 hex chars. No wall clock — identical input re-runs
- * overwrite the same artifact file.
+ * config.yaml content hash — literal "absent" sentinel when absent — hashes
+ * of the conventions ledger, corpus map, and structural seed, ruleset version,
+ * engine version, and — only when there is one — the `gh` metadata outcome),
+ * truncated to 16 hex chars. No wall clock — identical input re-runs overwrite
+ * the same artifact file.
  *
  * The `gh` term is APPENDED and omitted when absent, so every non-PR scope
  * hashes exactly the tuple it hashed before it existed (bare
@@ -1418,6 +1490,7 @@ function computeRunId(
   fileHashes: readonly (readonly [string, string])[],
   deletedFiles: readonly string[],
   configHash: string,
+  knowledgeHashes: Readonly<Record<string, string>>,
   ghIdentity?: unknown,
 ): string {
   let tsconfigHash: string;
@@ -1440,7 +1513,8 @@ function computeRunId(
         deletedFiles,
         tsconfigHash,
         configHash,
-        RULESET_VERSION,
+        knowledgeHashes,
+        RULESET_VERSIONS_MANIFEST,
         ENGINE_VERSION,
         ...(ghIdentity === undefined ? [] : [ghIdentity]),
       ]),

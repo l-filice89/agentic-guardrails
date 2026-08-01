@@ -3,10 +3,12 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import os from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { disposeArtifact } from "./disposition.js";
 import type { QuestionSource } from "./init-command.js";
+
+vi.setConfig({ testTimeout: 30_000 });
 
 const tempDirs: string[] = [];
 

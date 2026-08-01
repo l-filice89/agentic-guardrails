@@ -396,10 +396,19 @@ export function worktreeBaseDir(repoRoot: string, baseRoot: string): string {
 
 /** Usable = short enough for git on Windows, creatable, and writable —
  * proven by an actual probe write, not by a permission bit. */
-function baseDirProblem(candidate: string): string | undefined {
-  if (candidate.length > MAX_BASE_PATH_LENGTH) {
+export function baseDirLengthProblem(
+  candidate: string,
+  platform: NodeJS.Platform = process.platform,
+): string | undefined {
+  if (platform === "win32" && candidate.length > MAX_BASE_PATH_LENGTH) {
     return `base path is ${candidate.length} chars (max ${MAX_BASE_PATH_LENGTH}); git cannot create a worktree under a long base on Windows`;
   }
+  return undefined;
+}
+
+function baseDirProblem(candidate: string): string | undefined {
+  const lengthProblem = baseDirLengthProblem(candidate);
+  if (lengthProblem !== undefined) return lengthProblem;
   const probe = path.join(candidate, `${PROBE_PREFIX}${process.pid}-${randomBytes(2).toString("hex")}`);
   try {
     mkdirSync(fsPath(candidate), { recursive: true });
@@ -898,8 +907,15 @@ export async function withWorktree<T>(
   if (removal.degradation) degradations.push(removal.degradation);
 
   if (threw) {
-    if (degradations.length > 0 && typeof thrown === "object" && thrown !== null) {
-      (thrown as Record<symbol, unknown>)[DEGRADATIONS_ON_ERROR] = degradations;
+    if (degradations.length > 0) {
+      const throwable =
+        typeof thrown === "object" && thrown !== null
+          ? thrown
+          : new Error(`worktree callback threw a non-Error value: ${String(thrown)}`, {
+              cause: thrown,
+            });
+      (throwable as Record<symbol, unknown>)[DEGRADATIONS_ON_ERROR] = degradations;
+      throw throwable;
     }
     throw thrown;
   }

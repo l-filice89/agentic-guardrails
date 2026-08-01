@@ -4,7 +4,7 @@ import { z } from "zod";
  * One degraded unit of work inside an otherwise-successful result:
  * what was skipped/partial (`subject`) and why (`reason`).
  */
-export const degradationSchema = z.object({
+export const degradationSchema = z.strictObject({
   reason: z.string().min(1),
   subject: z.string().min(1),
 });

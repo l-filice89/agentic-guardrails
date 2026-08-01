@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import os from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   commitPath,
@@ -24,6 +24,9 @@ import {
   uncommittedFiles,
   EMPTY_TREE_SHA,
 } from "./git.js";
+
+// Real git process startup is heavily contended in the full parallel suite.
+vi.setConfig({ testTimeout: 30_000 });
 
 const tempDirs: string[] = [];
 
@@ -121,6 +124,10 @@ describe("fileGitStatus", () => {
 
     writeFileSync(path.join(dir, "new.txt"), "u\n");
     expect(fileGitStatus(dir, "new.txt")).toEqual({ ok: true, value: "untracked" });
+
+    writeFileSync(path.join(dir, ".gitignore"), "ignored.txt\n");
+    writeFileSync(path.join(dir, "ignored.txt"), "ignored\n");
+    expect(fileGitStatus(dir, "ignored.txt")).toEqual({ ok: true, value: "untracked" });
   });
 
   it("returns a typed error outside a repo, never throws", () => {

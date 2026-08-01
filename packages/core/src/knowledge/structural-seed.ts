@@ -59,7 +59,7 @@ function compare(a: string, b: string): number {
  */
 export type StructuralSeedRead =
   | { ok: true; bytes: Buffer }
-  | { ok: false; absent: boolean; message: string };
+  | { ok: false; absent: boolean; message: string; identity: string };
 
 export function readStructuralSeedFile(root: string): StructuralSeedRead {
   try {
@@ -69,11 +69,12 @@ export function readStructuralSeedFile(root: string): StructuralSeedRead {
       return {
         ok: false,
         absent: true,
+        identity: "absent",
         message: `seed file absent at ${STRUCTURAL_SEED_PATH} — run \`guardrails init\` to derive the structural corpus`,
       };
     }
-    const message = error instanceof Error ? error.message : String(error);
-    return { ok: false, absent: false, message: `seed unreadable: ${message.split("\n")[0]}` };
+    const code = (error as NodeJS.ErrnoException | null)?.code ?? "UNKNOWN";
+    return { ok: false, absent: false, identity: `unreadable:${code}`, message: `seed unreadable: ${code}` };
   }
 }
 

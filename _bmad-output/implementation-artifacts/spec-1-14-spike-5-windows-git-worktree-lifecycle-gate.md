@@ -120,6 +120,15 @@ warnings: []
 
 Gate re-earned after patching (the pre-patch PASS was not trustworthy given the integrity holes): full 100-cycle re-run, all scenarios passing, zero skipped, plus five negative controls each proven to make the harness fail (prefix bound, no-op removal, stray-file residue, hidden retry count, deleted ref hashing).
 
+### 2026-08-01 — Independent follow-up review pass (stamp consumed)
+- reviewed_range: a4d1cde4..b0e9c66d, verified against HEAD
+- forced_areas: repository namespacing, three-state registration checks, lock honoring, failed-add cleanup, and cross-process live markers remain present.
+- findings_fixed_and_verified_at_HEAD:
+  - audit_note: The bullets below preserve each original defect statement for audit continuity; they are fixed, not current findings. The adjacent remediation evidence names the HEAD verification surface.
+  - remediation_evidence: `packages/core/src/git/worktree.test.ts`; focused regression suite passed 2026-08-01.
+  - [medium] packages/core/src/git/worktree.ts:896-904 — cleanup degradations are attached only when the callback throws an object. JavaScript permits `throw "failed"`, `throw 42`, and `throw null`; on those paths a failed removal/leaked worktree is pushed into `degradations` and then lost when the primitive is rethrown. This is the residual form of the prior HIGH “callback throws + cleanup fails silently” defect. Wrap primitive throws in an `Error` with `cause`, or provide a result/error channel that can always carry cleanup degradations.
+  - [low] packages/core/src/git/worktree.ts:400-403 — the 160-character base-path rejection is applied on Linux/macOS too, although its reason and measured failure are Windows-specific. A valid long POSIX temp root unnecessarily degrades to the user's home directory (or fails if that fallback is also long). Gate the conservative limit on `win32`; retain the actual create/write probe everywhere.
+
 ## Design Notes
 
 - Shipping the real primitive rather than a throwaway is the 1.5 lesson applied: SPIKE-3 measured `runReview` itself, so its numbers meant something for the shipped tool. A spike that proves a parallel implementation proves nothing about what 1.15 will actually run.

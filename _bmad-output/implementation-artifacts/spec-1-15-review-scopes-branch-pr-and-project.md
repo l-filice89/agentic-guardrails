@@ -273,6 +273,15 @@ warnings:
 
 No findings were deferred or rejected.
 
+### 2026-08-01 — Independent follow-up review pass (stamp consumed)
+- reviewed_range: f6f92e11..41ea7965, verified against HEAD
+- forced_areas: sibling-process worktree protection, deterministic no-op disposition, worktree-path-independent cache identity, and PR metadata in run identity remain intact.
+- findings_fixed_and_verified_at_HEAD:
+  - audit_note: The bullets below preserve each original defect statement for audit continuity; they are fixed, not current findings. The adjacent remediation evidence names the HEAD verification surface.
+  - remediation_evidence: `packages/core/src/pipeline/pipeline.test.ts` and `packages/core/src/pipeline/scope.test.ts`; focused regression suite passed 2026-08-01.
+  - [medium] packages/core/src/pipeline/pipeline.ts:435-466 — a branch/PR ref equal to HEAD is still analyzed from the dirty invoking tree while its change set and manifest name the committed ref. The review fix only adds an exit-neutral `scope-in-place` declaration; it does not prevent a dirty version of a changed file from creating/removing findings attributed to that ref. The artifact is therefore not evidence of the ref it says it reviewed. Either isolate all ref scopes and add a separate explicit “include working tree” mode, or record the analyzed working-tree content identity as the scope rather than the ref.
+  - [low] packages/core/src/pipeline/scope.ts:285-287,360-361 — the engine's own `_agentic-guardrails/` exclusion is case-sensitive while configured exclusions use `foldCase`. On win32/darwin, a repository whose tracked spelling is `_Agentic-Guardrails/...` names the same directory but bypasses the built-in exclusion, allowing generated artifacts/history into both the reviewed set and changed-KLOC. Route the built-in prefix through the same matcher.
+
 
 ## Auto Run Result
 

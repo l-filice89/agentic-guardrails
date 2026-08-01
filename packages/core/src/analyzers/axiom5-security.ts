@@ -245,7 +245,9 @@ const SECRET_NAME_PARTS = new Set([
 function isSecretName(identifier: string): boolean {
   const parts = identifier
     .split(/[_-]/)
-    .flatMap((segment) => segment.split(/(?=[A-Z])/))
+    .flatMap(
+      (segment) => segment.match(/[A-Z]+(?=[A-Z][a-z]|\d|$)|[A-Z]?[a-z]+|\d+/g) ?? [segment],
+    )
     .map((part) => part.toLowerCase())
     .filter((part) => part.length > 0);
   const last = parts.at(-1);

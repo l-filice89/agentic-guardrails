@@ -89,6 +89,15 @@ describe("checkBoundaries", () => {
     expect(violations.some((v) => v.includes('"@ai-sdk/openai"'))).toBe(true);
   });
 
+  it("flags every package in the Anthropic SDK scope", () => {
+    const violations = checkBoundaries({
+      contracts: {},
+      core: { dependencies: { "@anthropic-ai/claude-agent-sdk": "^1.0.0" } },
+    });
+
+    expect(violations.some((v) => v.includes('"@anthropic-ai/claude-agent-sdk"'))).toBe(true);
+  });
+
   it("flags a denylisted SDK smuggled in via pnpm.overrides", () => {
     const violations = checkBoundaries({
       contracts: {},

@@ -116,6 +116,15 @@ warnings: [oversized]
 
 Rejected: exit-code "degradation dominates findings" design challenge (documented, intentional; revisit if 1.18 CI gating needs split codes); clean-tree runId being a global constant (harmless — scope identity lands with 1.15 scopes); deleted-file dangling-importer detection (an unresolvable-import finding is 1.9 rule scope, and the import graph already degrades the missing target).
 
+### 2026-07-31 — Independent follow-up review pass (stamp consumed)
+- reviewed_range: 1d1b9d73..422768f7, verified against HEAD
+- revalidated: 2026-08-01 — both medium findings traced through current scope and identity code; lower-value git/nested-tsconfig notes removed
+- findings_fixed_and_verified_at_HEAD:
+  - audit_note: The bullets below preserve each original defect statement for audit continuity; they are fixed, not current findings. The adjacent remediation evidence names the HEAD verification surface.
+  - remediation_evidence: `packages/core/src/pipeline/pipeline.test.ts`; focused regression suite passed 2026-08-01.
+  - `[medium]` `packages/core/src/pipeline/pipeline.ts:845-855` — for working-tree scopes (`fromRefs: false`) the content-snapshot `catch` files EVERY read error as a deletion, not just ENOENT: a permission-denied/locked file (or a modified submodule dir → EISDIR) is silently dropped from analysis with no degradation and misreported in `deletedFiles`. The 1.16 fix added the unreadable-≠-deleted distinction for ref scopes only; the uncommitted/project branch still swallows EACCES/EBUSY as "deleted".
+  - `[medium]` `packages/core/src/pipeline/pipeline.ts:1415-1450` — `computeRunId` still omits analyzer/manifest inputs that live outside the change set: `_agentic-guardrails/**` is excluded from the change set by design, so an uncommitted edit to conventions.yaml/corpus-map.yaml or a re-`init`ed structural seed changes artifact bytes (manifest.ledgerHash/corpusHash/corpusSeedHash, axiom-6 findings — the seed IS in axiom-6's cache key, proving it is output-determining) under the SAME runId, silently overwriting the artifact. Same defect class as the 1.4-review HIGH fixed for the root tsconfig.
+
 ## Design Notes
 
 CLI summary sketch (UI-MOCK-GATE substitute — plain sequential text, no placement dimension):

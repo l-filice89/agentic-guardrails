@@ -117,6 +117,14 @@ warnings: []
 
 Rejected: duplicated CLI summary-copy assertions across three e2e files — explicit per-suite assertions are acceptable test style, not a defect.
 
+### 2026-08-01 — Independent follow-up review pass (stamp consumed)
+- reviewed_range: 2e04a6f8..371e4cbf, verified against HEAD
+- findings_fixed_and_verified_at_HEAD:
+  - audit_note: The bullets below preserve each original defect statement for audit continuity; they are fixed, not current findings. The adjacent remediation evidence names the HEAD verification surface.
+  - remediation_evidence: `packages/core/src/analyzers/axiom4-nfr.test.ts`; focused regression suite passed 2026-08-01.
+  - [medium] packages/core/src/analyzers/axiom4-nfr.ts:243-258 — `fetchLacksSignal` returns “unknown/safe” as soon as it sees ANY spread, before inspecting later properties. `{ ...defaults, signal: undefined }` is therefore not flagged even though JavaScript property order makes the final signal provably absent; this contradicts the pinned “literal `signal: undefined` still flags” rule. Inspect the last effective explicit `signal` after spreads, or at minimum continue scanning properties that occur after a spread.
+  - [low] packages/core/src/analyzers/axiom4-nfr.ts:246-260 — object-literal getters/setters/methods named `signal` are not recognized as signal properties. A valid getter such as `{ get signal() { return controller.signal; } }` is falsely reported missing, despite the resulting object having a signal value. This is valid syntax, not the documented non-literal-options ceiling.
+
 ## Design Notes
 
 - All-warnings is the honest severity for a tier that pattern-matches without runtime context: a false "error" from a heuristic would gate legitimate code (the 1.10 HIGH lesson). An operator who wants axiom 4 to gate can set maxFindings via config only when errors exist — the doc states that warnings are the tier ceiling and Epic 3's LLM tier is where confidence rises.

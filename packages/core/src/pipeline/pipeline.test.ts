@@ -1,10 +1,12 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   unlinkSync,
   writeFileSync,
@@ -26,6 +28,7 @@ import {
   computeGraphKey,
   DuplicateAnalyzerError,
   runReview,
+  workingTreeReadFailureIsDeletion,
   type Analyzer,
 } from "./pipeline.js";
 
@@ -79,6 +82,7 @@ function fakeFinding(file: string): Finding {
 
 const okAnalyzer: Analyzer = {
   axiom: "1",
+  cacheVersion: "test-ok-v1",
   run: async () => ({ findings: [fakeFinding("change.ts")], degraded: [] }),
 };
 const cleanAnalyzer: Analyzer = {
@@ -108,6 +112,23 @@ describe("runReview preflight (phase 0)", () => {
 });
 
 describe("runReview per-axiom isolation (phase 1)", () => {
+  it("never serves a shipped or differently-versioned cache entry to a custom analyzer", async () => {
+    const cwd = tempRepoWithChange();
+    const cacheSecretPath = path.join(tempDir(), "secret");
+    const first = await runReview({ cwd, cacheSecretPath, analyzers: [okAnalyzer] });
+    const replacement: Analyzer = {
+      axiom: "1",
+      cacheVersion: "test-clean-v2",
+      run: async () => ({ findings: [], degraded: [] }),
+    };
+    const second = await runReview({ cwd, cacheSecretPath, analyzers: [replacement] });
+    expect(first.ok && second.ok).toBe(true);
+    if (!first.ok || !second.ok) return;
+    expect(first.artifact.findings).toHaveLength(1);
+    expect(second.artifact.findings).toEqual([]);
+    expect(second.artifact.manifest.cache?.hits).toBe(0);
+  });
+
   it("a throwing analyzer degrades the manifest, names the axiom, and the run continues", async () => {
     const cwd = tempRepoWithChange();
     const result = await runReview({ cwd, analyzers: [okAnalyzer, crashingAnalyzer] });
@@ -459,6 +480,7 @@ function countingAnalyzer(axiom: string, findings: Finding[] = []): { analyzer: 
   return {
     analyzer: {
       axiom,
+      cacheVersion: `test-counting-${axiom}-v1`,
       run: async () => {
         runs += 1;
         return { findings, degraded: [] };
@@ -473,6 +495,20 @@ function findingsCacheDir(cwd: string): string {
 }
 
 describe("runReview deterministic cache (1.7)", () => {
+  it("declares and disables caching after an operational write failure", async () => {
+    const cwd = tempRepoWithChange();
+    const blockedKind = findingsCacheDir(cwd);
+    mkdirSync(path.dirname(blockedKind), { recursive: true });
+    writeFileSync(blockedKind, "not a directory");
+    const result = await runReview({ cwd, analyzers: [okAnalyzer] });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.artifact.manifest.cache?.disabled).toContain("cache write failed");
+    expect(result.runDegraded).toContainEqual(
+      expect.objectContaining({ subject: "cache/findings/axiom-1" }),
+    );
+  });
+
   it("a warm run skips analyzer execution, records hits in the manifest, and is byte-identical modulo manifest.cache", async () => {
     const cwd = tempRepoWithChange();
     const spy = countingAnalyzer("1", [fakeFinding("change.ts")]);
@@ -610,6 +646,71 @@ describe("runReview deterministic cache (1.7)", () => {
 });
 
 describe("runReview phase budget (1.7)", () => {
+  it("declares a cache hit that completes after the phase deadline", async () => {
+    const cwd = tempRepoWithChange();
+    const spy = countingAnalyzer("1");
+    const warm = await runReview({ cwd, analyzers: [spy.analyzer], phase1BudgetMs: 1_000 });
+    const lateHit = await runReview({ cwd, analyzers: [spy.analyzer], phase1BudgetMs: 0 });
+    expect(warm.ok && lateHit.ok).toBe(true);
+    if (!warm.ok || !lateHit.ok) return;
+    expect(spy.runs()).toBe(1);
+    expect(lateHit.runDegraded).toContainEqual({
+      reason: "phase 1 exceeded its 0ms budget — cache hit completed after the deadline",
+      subject: "axiom-1",
+    });
+  });
+
+  it("detects a synchronous analyzer that blocks past the deadline and excludes its result from cache", async () => {
+    const cwd = tempRepoWithChange();
+    let calls = 0;
+    const blocking: Analyzer = {
+      axiom: "1",
+      run: async () => {
+        calls += 1;
+        const until = Date.now() + 30;
+        while (Date.now() < until) { /* deliberate synchronous CPU work */ }
+        return { findings: [], degraded: [] };
+      },
+    };
+    const options = { cwd, analyzers: [blocking], phase1BudgetMs: 5 };
+    const first = await runReview(options);
+    const second = await runReview(options);
+    expect(first.ok && second.ok).toBe(true);
+    if (!first.ok || !second.ok) return;
+    expect(calls).toBe(2);
+    expect(first.runDegraded).toContainEqual({
+      reason: "phase 1 exceeded its 5ms budget — analyzer completed after the deadline",
+      subject: "axiom-1",
+    });
+  });
+
+  it("warns when the governing config git-status probe fails", async () => {
+    const cwd = tempRepoWithChange();
+    writeConfig(cwd, "axioms: {}\n");
+    const healthy = await runReview({ cwd, analyzers: [cleanAnalyzer] });
+    rmSync(path.join(cwd, "_agentic-guardrails", ".cache"), { recursive: true, force: true });
+    const gitDir = path.join(cwd, ".git");
+    const hiddenGitDir = path.join(cwd, ".git-hidden-for-test");
+    const sabotage: Analyzer = {
+      axiom: "1",
+      run: async () => {
+        renameSync(gitDir, hiddenGitDir);
+        return { findings: [], degraded: [] };
+      },
+    };
+    try {
+      const result = await runReview({ cwd, analyzers: [sabotage] });
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.configWarnings.join("\n")).toContain("config git status unavailable");
+      expect(result.artifact.manifest.configGitStatus).toBeUndefined();
+      expect(healthy.ok).toBe(true);
+      if (healthy.ok) expect(result.artifact.runId).not.toBe(healthy.artifact.runId);
+    } finally {
+      if (existsSync(hiddenGitDir)) renameSync(hiddenGitDir, gitDir);
+    }
+  });
+
   it("a phase over budget degrades to partials with a typed reason — never an uncaught failure", async () => {
     const cwd = tempRepoWithChange();
     const slow: Analyzer = {
@@ -897,6 +998,30 @@ describe("runReview merge step (phase 4, FR-21)", () => {
 });
 
 describe("runReview manifest truth + wiring preflight (1.8)", () => {
+  it("changes run identity when governing knowledge or structural-seed bytes change", async () => {
+    const cwd = tempRepoWithChange();
+    const outRoot = path.join(cwd, "_agentic-guardrails");
+    const seedPath = path.join(cwd, STRUCTURAL_SEED_PATH);
+    mkdirSync(path.dirname(seedPath), { recursive: true });
+    writeFileSync(path.join(outRoot, "conventions.yaml"), "schemaVersion: 1\nconventions: []\n");
+    writeFileSync(path.join(outRoot, "corpus-map.yaml"), "schemaVersion: 1\nhumanConfirmed: []\n");
+    writeFileSync(seedPath, '{"seed":1}\n');
+    const first = await runReview({ cwd, analyzers: [cleanAnalyzer] });
+    writeFileSync(path.join(outRoot, "conventions.yaml"), "# changed bytes\nschemaVersion: 1\nconventions: []\n");
+    const ledgerChanged = await runReview({ cwd, analyzers: [cleanAnalyzer] });
+    writeFileSync(seedPath, '{"seed":2}\n');
+    const seedChanged = await runReview({ cwd, analyzers: [cleanAnalyzer] });
+    unlinkSync(seedPath);
+    const seedAbsent = await runReview({ cwd, analyzers: [cleanAnalyzer] });
+    mkdirSync(seedPath);
+    const seedUnreadable = await runReview({ cwd, analyzers: [cleanAnalyzer] });
+    expect(first.ok && ledgerChanged.ok && seedChanged.ok && seedAbsent.ok && seedUnreadable.ok).toBe(true);
+    if (!first.ok || !ledgerChanged.ok || !seedChanged.ok || !seedAbsent.ok || !seedUnreadable.ok) return;
+    expect(ledgerChanged.artifact.runId).not.toBe(first.artifact.runId);
+    expect(seedChanged.artifact.runId).not.toBe(ledgerChanged.artifact.runId);
+    expect(seedUnreadable.artifact.runId).not.toBe(seedAbsent.artifact.runId);
+  });
+
   it("hashes committed conventions/corpus-map bytes and drops the sentinel degradations", async () => {
     const cwd = tempRepoWithChange();
     const outRoot = path.join(cwd, "_agentic-guardrails");
@@ -1028,7 +1153,8 @@ describe("runReview manifest truth + wiring preflight (1.8)", () => {
       expect(result.ok).toBe(true);
       if (!result.ok) return;
       const hashKey = subject === "ledger" ? "ledgerHash" : "corpusHash";
-      expect(result.artifact.manifest[hashKey]).toBe(
+      expect(result.artifact.manifest[hashKey]).toMatch(/^[0-9a-f]{64}$/);
+      expect(result.artifact.manifest[hashKey]).not.toBe(
         "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       );
       const degradation = result.runDegraded.find((d) => d.subject === subject);
@@ -1132,7 +1258,7 @@ describe("review scopes (1.15)", () => {
     git(cwd, ["checkout", "-q", "feature"]);
     writeFileSync(
       path.join(cwd, "feature.ts"),
-      'export const awsKey = "AKIAABCDEFGHIJKLMNOP";\n',
+      'export const awsKey = "AKIA" + "ABCDEFGHIJKLMNOP";\n',
     );
     git(cwd, ["commit", "-qam", "secret"]);
     git(cwd, ["checkout", "-q", "main"]);
@@ -1165,32 +1291,26 @@ describe("review scopes (1.15)", () => {
     expect(first.artifactJson).not.toContain(JSON.stringify(os.tmpdir()).slice(1, -1));
   });
 
-  it("analyzes IN PLACE when the reviewed ref is the current HEAD — the DIRTY tree is what gets read", async () => {
+  it("isolates a reviewed ref even when it is current HEAD — dirty bytes never masquerade as committed", async () => {
     const cwd = scopedRepo();
     const worktreeBaseDir = tempDir();
-    // `on-main.ts` is what `main` added since the fork — i.e. it IS the change
-    // set for this scope. Editing it WITHOUT committing is content only the
-    // in-place path can ever see: a worktree at `main` would hold the
-    // committed bytes and find nothing.
+    // `on-main.ts` is in the ref diff. Dirty it with a security finding that
+    // does not exist in the commit; ref scope must still read committed bytes.
     writeFileSync(
       path.join(cwd, "on-main.ts"),
-      'export const awsKey = "AKIAABCDEFGHIJKLMNOP";\n',
+      'export const awsKey = "AKIA" + "ABCDEFGHIJKLMNOP";\n',
     );
     const result = await runReview({
       cwd,
-      // `main` IS HEAD: checking it out into a worktree would silently review
-      // a tree without the user's uncommitted state.
       scope: { kind: "branch", ref: "main", base: "feature" },
       worktreeBaseDir,
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.artifact.changedFiles).toEqual(["on-main.ts"]);
-    expect(result.artifact.findings.map((f) => f.location.file)).toContain("on-main.ts");
+    expect(result.artifact.findings.map((f) => f.location.file)).not.toContain("on-main.ts");
     expect(worktreeResidue(worktreeBaseDir)).toEqual([]);
-    // …and because the analyzed content is NOT the ref the manifest records,
-    // the divergence is DECLARED rather than left for the reader to guess.
-    expect(result.declaredOnly.map((d) => d.subject)).toContain("scope-in-place");
+    expect(result.declaredOnly.map((d) => d.subject)).not.toContain("scope-in-place");
   });
 
   it("DECLARES an in-place ref scope whose working tree diverges from the reviewed ref", async () => {
@@ -1214,23 +1334,11 @@ describe("review scopes (1.15)", () => {
     expect(clean.declaredOnly.map((d) => d.subject)).not.toContain("scope-in-place");
   });
 
-  it("a file that cannot be READ at a ref scope is a DEGRADATION, never a silent deletion", async () => {
-    const cwd = scopedRepo();
-    // The change set comes from COMMITS: `on-main.ts` exists at `main`. Remove
-    // it from the working tree (in place, so the read comes from there) and
-    // the file becomes unreadable — which must not be filed as "the branch
-    // deleted it", which reads as a clean review of a smaller diff.
-    unlinkSync(path.join(cwd, "on-main.ts"));
-    const result = await runReview({
-      cwd,
-      scope: { kind: "branch", ref: "main", base: "feature" },
-      analyzers: [okAnalyzer],
-    });
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.artifact.deletedFiles).toEqual([]);
-    expect(result.runDegraded.map((d) => d.subject)).toContain("on-main.ts");
-    expect(result.degradedRun).toBe(true);
+  it("classifies only ENOENT as a working-tree deletion", () => {
+    expect(workingTreeReadFailureIsDeletion({ code: "ENOENT" })).toBe(true);
+    for (const code of ["EACCES", "EPERM", "EISDIR", "EBUSY"]) {
+      expect(workingTreeReadFailureIsDeletion({ code }), code).toBe(false);
+    }
   });
 
   it("DECLARES an empty ref diff — 'nothing was reviewed' must not look like 'nothing was wrong'", async () => {

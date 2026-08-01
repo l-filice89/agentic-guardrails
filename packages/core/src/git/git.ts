@@ -640,6 +640,16 @@ export function fileGitStatus(cwd: string, relPath: string): GitResult<FileGitSt
     relPath,
   ]);
   if (!result.ok) return { ok: false, reason: result.reason };
-  if (parsePorcelainZ(result.value).length === 0) return { ok: true, value: "committed" };
+  if (parsePorcelainZ(result.value).length === 0) {
+    // Status omits ignored files. Prove the path is tracked before calling a
+    // quiet result committed; otherwise an ignored config is still untracked.
+    const tracked = gitExitStatus(
+      cwd,
+      ["ls-files", "--error-unmatch", "--", relPath],
+      [0, 1],
+    );
+    if (!tracked.ok) return tracked;
+    return { ok: true, value: tracked.value === 0 ? "committed" : "untracked" };
+  }
   return { ok: true, value: result.value.startsWith("??") ? "untracked" : "modified" };
 }

@@ -48,6 +48,10 @@ import type { z } from "zod";
 
 import { fsPath } from "../git/worktree.js";
 
+function compareStrings(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
 /** Repo-relative path of the committed history directory. */
 export const HISTORY_DIR = "_agentic-guardrails/history";
 /** Repo-relative path of the committed trend store. */
@@ -151,6 +155,8 @@ export interface AppendResult {
   skipped: number;
   /** true → a torn trailing record was repaired before this append. */
   repaired: boolean;
+  /** Deterministic conflict resolutions observed while selecting revisions. */
+  declarations?: string[];
 }
 
 /**
@@ -330,13 +336,30 @@ export function appendDispositions(
   const read = readJsonl(filePath, dispositionRecordSchema);
   if (!read.ok) return read;
   const latest = new Map<string, DispositionRecord>();
+  const revisionGroups = new Map<string, DispositionRecord[]>();
   for (const record of read.value.records) {
+    const revisionKey = JSON.stringify([record.key.runId, record.key.findingId, record.revision]);
+    const group = revisionGroups.get(revisionKey);
+    if (group === undefined) revisionGroups.set(revisionKey, [record]);
+    else group.push(record);
     const key = `${record.key.runId} ${record.key.findingId}`;
     const current = latest.get(key);
     // File order is append order; a higher revision is later by construction,
     // and `merge=union` can interleave the two orders.
-    if (current === undefined || record.revision >= current.revision) latest.set(key, record);
+    if (current === undefined || record.revision > current.revision) {
+      latest.set(key, record);
+    } else if (record.revision === current.revision && record.recordId < current.recordId) {
+      const winner = record.recordId < current.recordId ? record : current;
+      latest.set(key, winner);
+    }
   }
+  const declarations = [...revisionGroups.values()]
+    .filter((group) => new Set(group.map((record) => record.disposition)).size > 1)
+    .map((group) => {
+      const winner = [...group].sort((a, b) => compareStrings(a.recordId, b.recordId))[0]!;
+      return `conflicting dispositions at revision ${winner.revision} for ${winner.key.runId}/${winner.key.findingId} — selected ${winner.disposition} by recordId order`;
+    })
+    .sort(compareStrings);
   const records: DispositionRecord[] = [];
   for (const entry of entries) {
     const key = `${entry.runId} ${entry.findingId}`;
@@ -354,11 +377,25 @@ export function appendDispositions(
     records.push(record);
   }
   const skipped = entries.length - records.length;
-  if (records.length === 0) return { ok: true, value: { appended: 0, skipped, repaired: false } };
+  if (records.length === 0) {
+    return {
+      ok: true,
+      value: {
+        appended: 0,
+        skipped,
+        repaired: false,
+        ...(declarations.length === 0 ? {} : { declarations }),
+      },
+    };
+  }
   const appended = appendJsonl(filePath, dispositionRecordSchema, records);
   if (!appended.ok) return appended;
   return {
     ok: true,
-    value: { ...appended.value, skipped: appended.value.skipped + skipped },
+    value: {
+      ...appended.value,
+      skipped: appended.value.skipped + skipped,
+      ...(declarations.length === 0 ? {} : { declarations }),
+    },
   };
 }

@@ -119,6 +119,15 @@ warnings: []
 
 Rejected: LRU-vs-FIFO prune ordering (mtime prune is a ponytail ceiling — revisit if cache thrash is ever observed); merged-message separator collision (separator is display-only, findingId is the identity carrier); schemaVersion bump for the source-array shape (no deployed pre-v1 readers exist; migration ladder note suffices); dynamic phase-budget config surface (recorded later-scope in the spec, not a defect).
 
+### 2026-08-01 — Independent follow-up review pass (stamp consumed)
+- reviewed_range: 63571cb0..67324540, verified against HEAD
+- forced_areas: authenticated cache reads, post-abort cache suppression, deterministic merge ordering, declared cache disablement, and the async timeout path all remain covered and intact.
+- findings_fixed_and_verified_at_HEAD:
+  - audit_note: The bullets below preserve each original defect statement for audit continuity; they are fixed, not current findings. The adjacent remediation evidence names the HEAD verification surface.
+  - remediation_evidence: `packages/core/src/cache/deterministic-cache.test.ts` and `packages/core/src/pipeline/pipeline.test.ts`; focused regression suite passed 2026-08-01.
+  - [high] packages/core/src/pipeline/pipeline.ts:1067-1127 — the advertised wall-clock phase budget cannot stop or even detect the shipped analyzers that need it: every default analyzer is synchronous CPU-bound, and the `setTimeout(...abort...)` callback cannot run while one blocks the event loop. The only budget test uses an analyzer implemented with an asynchronous `setTimeout`; a synchronous analyzer taking 40 seconds can return before the timer callback runs, be accepted and cached, and leave `phase1Aborted === false`. The code comment at :1124 acknowledges the analyzers are synchronous, but the AC promises wall-clock degradation. This needs worker/process isolation, cooperative elapsed-time checks inside synchronous loops, or a narrower contract.
+  - [medium] packages/core/src/cache/deterministic-cache.ts:104-108,132-146 — cache I/O failures are still silent after initialization: `get()` maps every read failure (including EACCES/EIO, not only ENOENT) to an ordinary miss, and `put()` swallows every write/prune failure while the manifest continues to report caching enabled. The pipeline's “ZERO SILENT CACHE BEHAVIOR” preflight proves only that the root directory could be created; permissions, disk-full, antivirus locks, or prune failures later in the run are indistinguishable from healthy misses/writes.
+
 ## Design Notes
 
 - Cache key vs runId: runId identifies the WHOLE run (includes HEAD); cache keys identify per-unit work (graph: tsconfig hash + participating file content hashes; findings: graph key + axiom + ruleset + engine + tier-enablement) so an unrelated commit (HEAD change, same content) still cache-hits. State this asymmetry in code comments.

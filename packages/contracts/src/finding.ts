@@ -88,12 +88,21 @@ export const findingSchema = z
           message: "deterministic-tier findings come from 'ast' or 'regex', never 'llm'",
         });
       }
-    } else if (sources.some((s) => s !== "llm")) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["source"],
-        message: "inferred-tier findings come from 'llm'",
-      });
+    } else {
+      if (f.confidence <= 0) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["confidence"],
+          message: "inferred-tier findings carry confidence in (0..1]",
+        });
+      }
+      if (sources.some((s) => s !== "llm")) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["source"],
+          message: "inferred-tier findings come from 'llm'",
+        });
+      }
     }
   });
 

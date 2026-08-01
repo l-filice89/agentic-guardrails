@@ -215,6 +215,14 @@ Modified:
 
 Rejected (with proof where empirical): `allowBuilds` in pnpm-workspace.yaml flagged as unknown — verified working (no ignored-build-scripts warning; esbuild binary functional through clean install + tsup builds). `catalog:` protocol unhandled — repo uses no catalogs and the protocol carries no alias channel. Speculative-scaffolding complaints (integration project, per-package typecheck) — spec-mandated/harmless. Unverifiable future-version pins — verified empirically by the green gate suite. Denylist-is-fail-open architecture note — by design; the allowlist layer is `ALLOWED_WORKSPACE_DEPS`.
 
+### 2026-07-31 — Independent follow-up review pass (stamp consumed)
+- reviewed_range: repo-start..a000ef23, verified against HEAD
+- revalidated: 2026-08-01 — both findings reproduced against HEAD; neither is a speculative package-name concern
+- findings_fixed_and_verified_at_HEAD:
+  - remediation_evidence: `scripts/check-boundaries.test.mjs` and `scripts/eslint-core-boundary.test.mjs`; focused regression suite passed 2026-08-01.
+  - [medium] scripts/check-boundaries.mjs:31-53 — Anthropic scope siblings escape both walls: only `@anthropic-ai/sdk` is denylisted and `@anthropic-ai/` is absent from `LLM_SDK_SCOPE_PREFIXES` (which lists less-likely scopes like `@openrouter/`), so `import '@anthropic-ai/bedrock-sdk'` and `import '@anthropic-ai/claude-agent-sdk'` in `packages/core/src` pass lint clean (verified empirically via ESLint API at HEAD: 0 findings) and their manifest deps pass `isDeniedLlmName`; no package at HEAD depends on the scope, so adding the prefix breaks nothing.
+  - [low] eslint.config.js:44-53 — dynamic-import selectors match only `Literal` nodes: `await import(\`openai\`)` (expression-free template literal) escapes the wall (verified: 0 findings vs 1 for the string-literal form); add `TemplateLiteral[expressions.length=0]` variants or accept as an evasion channel alongside variable indirection.
+
 ## Auto Run Result
 
 - **Summary:** Story 1.1 review pass completed. Before review, an interrupted boundary-wall hardening session found in the working tree was finished and committed (generalized fail-closed manifest check, CLI split, denylist/scope extension, drift-proof eslint wiring; a half-applied `types`→`dist-types` flip was reverted as contradicting the recorded design). The adversarial + edge-case review pass then produced 15 patches (3 medium), all applied: two closed real lint-wall coverage holes (extension glob, dynamic import/require), one fixed per-package test config discovery; the rest hardened the manifest wall (root manifest, symlinks, overrides, alias parsing, name mismatch), CI hygiene, and docs.

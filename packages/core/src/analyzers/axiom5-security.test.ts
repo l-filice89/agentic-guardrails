@@ -654,6 +654,18 @@ describe("security/hardcoded-secret — assignment-pattern precision (1.12 P5/P6
     }
   });
 
+  it("keeps all-caps identifier segments whole", async () => {
+    const ctx = fixtureProject({
+      "src/a.ts": 'export const DB_PASSWORD = "hardcoded-database-value";\n',
+    });
+    const result = await axiom5Security.run(ctx);
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]).toMatchObject({
+      ruleId: "security/hardcoded-secret",
+      severity: "warning",
+    });
+  });
+
   it("a prettier-WRAPPED assignment still matches (whole-text scan), anchored at the identifier line", async () => {
     const ctx = fixtureProject({
       "src/a.ts": 'export const apiKey =\n  "fake-fixture-value-123456";\n',

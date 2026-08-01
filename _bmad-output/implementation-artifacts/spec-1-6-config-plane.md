@@ -107,6 +107,16 @@ warnings: []
 
 Rejected: finding.axiom vs analyzer.axiom mismatch (reachable only via custom analyzer injection in tests); __proto__ axiom-key hardening (Zod 4 record semantics + no external attack surface — config is repo-local YAML); duplicate axiomsOff entries (same custom-analyzer-only path); untyped reach into Zod unrecognized_keys internals (works on pinned Zod 4; message degrades gracefully); DEFAULT_CONFIG_YAML export "speculative" (1.8 init consumes it next; test un-tautologized instead of deleting).
 
+### 2026-07-31 — Independent follow-up review pass (stamp consumed)
+- reviewed_range: 4191932f..39f0ef26, verified against HEAD
+- revalidated: 2026-08-01 — ignored-file behavior reproduced with git; the optional-status omission remains visible in the current manifest path
+- findings_fixed_and_verified_at_HEAD:
+  - audit_note: The bullets below preserve each original defect statement for audit continuity; they are fixed, not current findings. The adjacent remediation evidence names the HEAD verification surface.
+  - remediation_evidence: `packages/core/src/git/git.test.ts` and `packages/core/src/pipeline/pipeline.test.ts`; focused regression suite passed 2026-08-01.
+  - [medium] packages/core/src/git/git.ts:633-645 — `fileGitStatus` classifies a git-IGNORED config.yaml as "committed": `git status --porcelain=v1 --untracked-files=all` emits nothing for an ignored path (needs `--ignored`), so `parsePorcelainZ(...).length === 0` → "committed". The manifest then durably records `configGitStatus: "committed"` for a file git has never tracked and the CLI's uncommitted-config warning stays silent — a gap in the prior medium "uncommitted-config visibility" patch (empirically confirmed: ignored file → empty porcelain output). Fix path: distinguish "no status entries" via `git check-ignore`/`ls-files --error-unmatch` before concluding "committed".
+  - [low] packages/core/src/pipeline/pipeline.ts:557-562 — on a `fileGitStatus` git failure, `configGitStatus` is silently omitted from the manifest with no warning line; because the field is optional-for-pre-1.6-artifacts, a consumer cannot distinguish "old artifact" from "status probe failed". Acknowledged in-code as a ponytail ceiling; noting it as the residual auditability soft spot.
+- notes: the two forced HIGH areas verified healed at HEAD — non-ENOENT read errors are typed exit-2 failures (config-loader.ts:91-110, never a silent default fallback), and gating is durably auditable (manifest configHash/configPresent/enforcement + full per-axiom gate verdict embedded in the artifact, pipeline.ts:584/628-665). Loader edge walk (malformed YAML, null `axioms:`, unknown keys, scalar/array roots, empty file, duplicate keys, threshold boundary N vs N+1, advisory-bypass, off-membership) found no further unhandled branches at HEAD.
+
 ## Design Notes
 
 - Deviation computation: parse the same YAML twice — once through the schema (validated), once raw — and diff configured paths against schema defaults; simpler: compute defaults object (`configSchema.parse({})`) and deep-diff validated vs defaults, reporting only paths present in the raw input (a default explicitly restated is not a deviation... it IS a stated value equal to default — report nothing; only values differing from defaults are deviations).

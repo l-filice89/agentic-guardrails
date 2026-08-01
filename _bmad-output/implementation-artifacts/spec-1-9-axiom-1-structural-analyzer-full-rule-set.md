@@ -117,6 +117,15 @@ warnings: [oversized] # accepted, not split: edge-line + boundaries substrate + 
   - `[low]` `[patch]` Doc/accuracy sweep: unassigned synthetic-line-1 carve-out, absolute specifiers named, per-target direction multiplicity stated, fixture $schema headers dropped, silent `?? 1` cycle-anchor fallback replaced with an explicit loud degradation.
   - `[medium]` `[defer]` unassigned-file has no exemption mechanism (ignore list / unlayered declaration) — guaranteed noise in repos with undeclared tooling paths; ledgered for 1.17 (SPIKE-4 noise metric) to measure before adding config surface.
 
+### 2026-07-31 — Independent follow-up review pass (stamp consumed)
+- reviewed_range: aff0bdee..00185677, verified against HEAD
+- revalidated: 2026-08-01 — forced fixes remain intact; the pathological case-duplicate note was removed, and the common asset-import issue was reclassified by gate impact
+- forced-scrutiny areas confirmed fixed at HEAD: ENGINE_VERSION cache-upgrade trap (now "0.0.3", clean-miss path seam-tested via `computeGraphKey(engineVersion)`); catch-all `paths: {"*"}` alias false errors (`matchesPathsAlias` skips bare `*`, prefix+suffix with length guard) — both patches survived 1.10–1.19; boundaries still in the findings cache key (pipeline.ts:1017), merge key still includes ruleId, edge identity still line-free.
+- findings_fixed_and_verified_at_HEAD:
+  - audit_note: The bullets below preserve each original defect statement for audit continuity; they are fixed, not current findings. The adjacent remediation evidence names the HEAD verification surface.
+  - remediation_evidence: `packages/core/src/adapter/typescript-adapter.test.ts`; focused regression suite passed 2026-08-01.
+  - [medium] packages/core/src/adapter/typescript-adapter.ts:206-211 — any relative specifier the TypeScript compiler cannot resolve becomes a blocking `structural/unresolved-import` error with no carve-out for bundler/plugin-resolved asset imports (`import "./x.css"`, `?raw` suffixes): ordinary Vite-style source can therefore fail the default gate even though the bundler resolves it successfully. This is not just a stated coverage ceiling; it is a false blocking finding and belongs in the SPIKE-4 noise surface or needs an explicit supported-extension policy.
+
 ## Design Notes
 
 - One `boundaries` key powers three AC clauses: direction breaches and disallowed cross-boundary imports are the same allowlist check; misplacement is its fail-closed complement (file in no layer). Zone-ROLE placement is deliberately left to Axiom #6/Epic 4 — this is layout-by-path, the only deterministic substrate available in Epic 1.

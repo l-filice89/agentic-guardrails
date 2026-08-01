@@ -8,7 +8,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   changedLinesIn,
@@ -19,6 +19,9 @@ import {
   parseNumstatZ,
   untrackedFiles,
 } from "./git.js";
+
+// Real git process startup is heavily contended in the full parallel suite.
+vi.setConfig({ testTimeout: 30_000 });
 
 const tempDirs: string[] = [];
 

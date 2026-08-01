@@ -489,6 +489,21 @@ describe("nfr/missing-abort-signal", () => {
     expect((await axiom4Nfr.run(ctx)).findings).toEqual([]);
   });
 
+  it("honors object property order and recognizes a signal getter", async () => {
+    const ctx = fixtureProject({
+      "src/a.ts": [
+        "export async function go(url: string, opts: RequestInit): Promise<void> {",
+        "  await fetch(url, { ...opts, signal: undefined });",
+        "  await fetch(url, { signal: undefined, ...opts });",
+        "  await fetch(url, { get signal() { return AbortSignal.timeout(1); } });",
+        "}",
+        "",
+      ].join("\n"),
+    });
+    const result = await axiom4Nfr.run(ctx);
+    expect(result.findings.map((finding) => finding.location.startLine)).toEqual([2]);
+  });
+
   it("HAZARD: `globalThis.fetch(...)` without a signal is covered", async () => {
     const ctx = fixtureProject({
       "src/a.ts": [

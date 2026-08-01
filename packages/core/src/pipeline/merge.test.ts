@@ -77,6 +77,22 @@ describe("mergeFindings (FR-21)", () => {
     ).toHaveLength(1);
   });
 
+  it("does not collapse distinct same-source findings sharing one anchor", () => {
+    const out = mergeFindings([
+      at("pair-a", 12, 12, {
+        ruleId: "cleanliness/duplicate-code",
+        source: "ast",
+        enclosingSymbol: "pair-a",
+      }),
+      at("pair-b", 12, 12, {
+        ruleId: "cleanliness/duplicate-code",
+        source: "ast",
+        enclosingSymbol: "pair-b",
+      }),
+    ]);
+    expect(out).toHaveLength(2);
+  });
+
   it("never merges across axioms, files, or tiers", () => {
     expect(mergeFindings([at("a", 10, 20), at("b", 10, 20, { axiom: "5" })])).toHaveLength(2);
     expect(

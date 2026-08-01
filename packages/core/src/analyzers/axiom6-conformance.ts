@@ -126,7 +126,7 @@ export const axiom6Conformance: Analyzer = {
         : { findings: [], degraded: [read.degradation] };
     }
 
-    const degraded: Degradation[] = [];
+    const degraded: Degradation[] = [...read.degraded];
     // The seed carries the producer's partial-result envelope. A convention
     // "confirmed" from an admittedly partial census may be measuring the half
     // that parsed — say so, out loud, and continue.
@@ -165,7 +165,12 @@ export const axiom6Conformance: Analyzer = {
 // ---- corpus of record ------------------------------------------------------
 
 type CorpusRead =
-  | { ok: true; entities: readonly { file: string; external: boolean }[]; coverage: number }
+  | {
+      ok: true;
+      entities: readonly { file: string; external: boolean }[];
+      coverage: number;
+      degraded: readonly Degradation[];
+    }
   | { ok: false; degradation: Degradation; declaredOnly: boolean };
 
 /**
@@ -199,7 +204,12 @@ function readCorpus(context: AnalyzerContext): CorpusRead {
   if (parsed.data.entities.length === 0) {
     return inconclusive("corpus empty — the seed declares no entities");
   }
-  return { ok: true, entities: parsed.data.entities, coverage: parsed.data.coverage };
+  return {
+    ok: true,
+    entities: parsed.data.entities,
+    coverage: parsed.data.coverage,
+    degraded: parsed.data.degraded,
+  };
 }
 
 function firstLine(message: string): string {

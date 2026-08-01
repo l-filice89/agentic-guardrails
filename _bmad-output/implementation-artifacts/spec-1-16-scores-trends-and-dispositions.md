@@ -3,7 +3,7 @@ title: 'Story 1.16: Scores, Trends, and Dispositions'
 type: 'feature'
 created: '2026-07-28'
 status: 'done'
-baseline_revision: d79c21d0f52dbcfa6ee5a5b0d5eb08f04a7b7a2f
+baseline_revision: d79c21dccf8f14a1620ccc7eabd4d635cc9457eb
 final_revision: 0fc7a204b51b91d6aadbb91e3da45ea91a87e3dc
 review_loop_iteration: 0
 followup_review_recommended: true # AUTO-FORCED: four HIGH inline findings (denominator counting the engine's own committed output; delta unreachable for ref scopes; torn-tail repair deleting a valid record; prototype-key answers writing schema-invalid committed records) + accepted OVERSIZED flag
@@ -319,6 +319,14 @@ warnings:
   - `[low]` `[patch]` Three tests that passed with the feature weakened: "keeps the delta OUT of the artifact" asserted only that the string "delta" was absent, so it passed if the delta were written under any other key — now pins the artifact's and scores block's key sets; the retention test asserted only a survivor COUNT and never that the artifact this run wrote was among them.
 
 No findings were deferred or rejected; nothing was refuted.
+
+### 2026-08-01 — Independent follow-up review pass (stamp consumed)
+- reviewed_range: intended d79c21dc..0fc7a204, verified against HEAD
+- findings_fixed_and_verified_at_HEAD:
+  - audit_note: The bullets below preserve each original defect statement for audit continuity; they are fixed, not current findings. The adjacent remediation evidence names the HEAD verification surface.
+  - remediation_evidence: `packages/core/src/persistence/history.test.ts`; focused regression suite passed 2026-08-01.
+  - [medium] story frontmatter:6 — `baseline_revision` is `d79c21d0f52dbcfa6ee5a5b0d5eb08f04a7b7a2f`, which is not an object in this repository. The actual “stamp story 1.15 final_revision” commit is `d79c21dccf8f14a1620ccc7eabd4d635cc9457eb`; consequently the story's declared review range cannot be reproduced as written. Correct the metadata before relying on automated range review.
+  - [medium] packages/core/src/persistence/history.ts:314-329 — concurrent branches can append different dispositions at the same next `revision` for one `{runId,findingId}`. After `merge=union`, `appendDispositions` resolves equal revisions using whichever line appears later (`>=`), but union merge order is not a semantic chronology. The advertised “latest wins” answer is therefore merge-order-dependent exactly on the concurrent-branch axis the storage design targets. Detect equal-revision/different-answer forks and declare them ambiguous, or use a deterministic conflict rule plus explicit provenance.
 
 
 ## Auto Run Result

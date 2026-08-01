@@ -1084,6 +1084,10 @@ So that conventions are explicit, versioned artifacts humans control (FR-2).
 **When** parsed,
 **Then** Zod-on-read guards YAML coercion footguns per the documented quoting discipline, entries sort by stable id, and a torn or invalid file produces the documented degraded path (human-review prompt), never silent regeneration.
 
+**Given** committed knowledge can be modified or replaced in the working tree,
+**When** `conventions.yaml` governs a run,
+**Then** its committed/modified/untracked status and integrity/trust model are declared alongside its content hash, matching the config plane's provenance visibility.
+
 **Given** any write by the tool,
 **When** it lands,
 **Then** human-owned entries are never silently regenerated — tool writes touch only tool-owned fields.
@@ -1103,6 +1107,10 @@ So that "what exists, where, why" stays current at activity-scaled cost (FR-1).
 **Given** the deterministic structural map,
 **When** the LLM inference half runs (via the envelope, one-way),
 **Then** purpose/zone-role/exemplar-designation proposals are produced for human confirmation; confirmed annotations land in committed `corpus-map.yaml`, regenerable structure stays in `.cache/`.
+
+**Given** the structural seed or `corpus-map.yaml` is consumed as authoritative input,
+**When** its bytes are read,
+**Then** the manifest declares committed/modified/untracked provenance and the documented integrity/trust decision; an unauthenticated replacement or deletion cannot silently change which conformance findings exist.
 
 **Given** the LLM half is disabled or degrades,
 **When** the map is consumed,
@@ -1164,6 +1172,10 @@ So that confirmation decisions rest on recorded intent, not vibes (FR-8).
 **Given** an entry with evidence,
 **When** displayed in the digest,
 **Then** each source is shown with provenance (what, where, when).
+
+**Given** a finding cites an enclosing symbol,
+**When** it is persisted or displayed as evidence,
+**Then** the human-readable symbol is separate from any synthetic identity discriminator, and the story records how existing `findingId` disposition continuity survives the contract change.
 
 ### Story 4.6: Curation Digest
 
@@ -1337,6 +1349,10 @@ So that CI enforcement is the identical engine, accountably (FR-27).
 **Given** the run manifest,
 **When** compared with an interactive run's manifest on the same input,
 **Then** both carry the same envelope schema version and the comparison passes 3.6's equivalence rules (deterministic tier byte-identical; LLM tier verdict-class equivalent).
+
+**Given** SPIKE-5's Windows worktree lifecycle is currently backed by one-time evidence,
+**When** the Action runner matrix is finalized,
+**Then** the Windows lifecycle gate is either automated on a Windows runner or the one-time-evidence posture is explicitly retained with current evidence and rationale.
 
 ### Story 5.5: Per-Axiom Status Checks and the Single PR Comment
 

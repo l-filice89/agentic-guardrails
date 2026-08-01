@@ -240,9 +240,14 @@ function fetchLacksSignal(call: CallExpression): boolean {
   if (Node.isIdentifier(options) && options.getText() === "undefined") return true;
   if (options.getKind() === SyntaxKind.NullKeyword) return true;
   if (!Node.isObjectLiteralExpression(options)) return false;
-  for (const prop of options.getProperties()) {
-    if (Node.isSpreadAssignment(prop)) return false; // cannot see inside
+  // Object properties apply left-to-right. Walk backwards so the first
+  // signal/spread encountered is the value that can determine the final
+  // `signal` property (`{ ...opts, signal: undefined }` provably lacks one;
+  // `{ signal: undefined, ...opts }` remains unknown).
+  for (const prop of [...options.getProperties()].reverse()) {
+    if (Node.isSpreadAssignment(prop)) return false; // a later spread may supply/override it
     if (Node.isShorthandPropertyAssignment(prop) && prop.getName() === "signal") return false;
+    if (Node.isGetAccessorDeclaration(prop) && prop.getName() === "signal") return false;
     if (Node.isPropertyAssignment(prop)) {
       const nameNode = prop.getNameNode();
       let name: string | undefined;

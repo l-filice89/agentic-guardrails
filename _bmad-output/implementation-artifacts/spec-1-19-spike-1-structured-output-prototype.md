@@ -108,6 +108,16 @@ warnings:
   - `[low]` `[patch]` CHANGELOG resurrection line now names the tag.
   - Rejected (13): 9 Edge Case Hunter findings on internals of the net-deleted harness with no consequence for the committed evidence (missing spawn error-handler, taskkill tree-kill, stale-dir reuse, corrupt-results parse, bar float arithmetic, torn-temp name heuristic, EISDIR read, infra-fault conflation — data shows 50/50 valid, instrument gone); post-timeout late-write race (max observed 120.6 s < 180 s, no data impact); "tree not in final state" (the finalize commit this pass creates the claimed state); "CHANGELOG bloat" (entry matches the 1.18 house style); re-run-command duplicate counted once as patch.
 
+### 2026-07-31 — Independent follow-up review pass (stamp consumed)
+
+- reviewed_range: 3131914a..c57d5846, verified against HEAD
+- revalidated: 2026-08-01 — numeric results, deterministic sample selection, tag reachability, and raw-result limitations independently checked again
+- findings_fixed_and_verified_at_HEAD:
+  - audit_note: The bullets below preserve each original defect statement for audit continuity; they are fixed, not current findings. The adjacent remediation evidence names the HEAD verification surface.
+  - remediation_evidence: `packages/contracts/src/index.test.ts` plus the evidence-qualified wording in `docs/spikes/SPIKE-1-structured-output.md`; focused regression suite passed 2026-08-01.
+  - [low] docs/spikes/SPIKE-1-structured-output.md:92 — the claim that outputs showed "confidence in (0..1] consistent with the schema's cross-field refinements" overstates both the schema and the evidence: the shipped `findingSchema` at HEAD validates `confidence: z.number().min(0).max(1)` with no >0 refinement for inferred-tier findings (the (0..1] bound is a doc comment plus the spike prompt, not a schema constraint), and the committed raw results record only per-attempt outcome + findings COUNT (harness stores `raw`/`rawBytes` only on failure), so per-finding values like confidence and the "no markdown fences" observation are not corroborable from the committed data — despite the doc's opening "Every number here is transcribed from the committed raw results" framing. Numeric claims themselves all reproduce (independently recomputed at this pass: 50/50 raw-valid, 125 findings at 1–3 per sample, median 39.2 s / min 15.7 s / max 120.6 s, 50 distinct files, sample list byte-identical to the deterministic formula re-run at HEAD).
+- verification_notes: raw-results internal consistency, file/index mapping, deterministic sample reproduction, tag `spike-1-harness` reachable, no spike-1 code in `git ls-files`, harness/skill read from the tag (skill contains no internal self-repair loop that would understate the raw rate) — all confirmed at HEAD. Curation, in-band schema, min(1)-findings wrapper, and tag-durability concerns are already disclosed in the doc and prior triage log; not re-litigated.
+
 ## Design Notes
 
 - The IDE is the LLM runtime (inversion of control): headless `claude -p "/spike-1-handshake <run-dir>"` is the honest realization of "real IDE invocation" — no provider SDK exists or is added (boundary-checked).

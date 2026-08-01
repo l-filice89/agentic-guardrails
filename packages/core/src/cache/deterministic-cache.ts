@@ -87,7 +87,15 @@ export function loadCacheSecret(secretPath = defaultCacheSecretPath()): Buffer |
 
 export type CacheReadResult<T> =
   | { hit: true; value: T }
-  | { hit: false; /** true → entry existed but failed MAC, JSON.parse, or schema. */ invalid: boolean };
+  | {
+      hit: false;
+      /** true → entry existed but failed MAC, JSON.parse, or schema. */
+      invalid: boolean;
+      /** Present when the entry could not be read for a reason other than absence. */
+      error?: string;
+    };
+
+export type CacheWriteResult = { ok: true } | { ok: false; reason: string };
 
 export class DeterministicCache {
   /**
@@ -104,8 +112,11 @@ export class DeterministicCache {
     let raw: string;
     try {
       raw = readFileSync(entryPath, "utf8");
-    } catch {
-      return { hit: false, invalid: false };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException | null)?.code === "ENOENT") {
+        return { hit: false, invalid: false };
+      }
+      return { hit: false, invalid: false, error: errorMessage(error) };
     }
     let data: unknown;
     try {
@@ -129,10 +140,10 @@ export class DeterministicCache {
     return parsed.success ? { hit: true, value: parsed.data } : { hit: false, invalid: true };
   }
 
-  /** Write-through, then prune the kind. A cache-write failure is silently
-   * swallowed — the caller already holds the computed value, and a cache
-   * that cannot write must never fail the run. */
-  put(kind: string, key: string, value: unknown): void {
+  /** Write-through, then prune the kind. Failures are returned so the caller
+   * can disable caching and declare the lost optimization without failing
+   * the review itself. */
+  put(kind: string, key: string, value: unknown): CacheWriteResult {
     const entryPath = this.entryPath(kind, key); // throws on a caller bug, never swallowed
     try {
       const dir = path.join(this.root, kind);
@@ -141,8 +152,9 @@ export class DeterministicCache {
       const mac = this.mac(key, payloadJson).toString("hex");
       writeFileAtomic(entryPath, `{"mac":"${mac}","payload":${payloadJson}}\n`);
       prune(dir);
-    } catch {
-      // best-effort by design
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, reason: errorMessage(error) };
     }
   }
 
@@ -154,6 +166,10 @@ export class DeterministicCache {
     if (!KEY_PATTERN.test(key)) throw new Error(`invalid cache key: ${JSON.stringify(key)}`);
     return path.join(this.root, kind, `${key}.json`);
   }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function prune(dir: string): void {

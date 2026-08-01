@@ -409,28 +409,35 @@ function duplicateFindings(occurrences: DuplicateOccurrence[]): Finding[] {
     if (group === undefined) groups.set(occurrence.hash, [occurrence]);
     else group.push(occurrence);
   }
-  const findings = new Map<string, Finding>();
+  const findings: Finding[] = [];
   for (const group of groups.values()) {
     if (group.length < 2) continue;
-    const original = group[0]!;
-    for (const dup of group.slice(1)) {
-      // A nested pair whose ENCLOSING function-likes are themselves the same
-      // duplicate pair is subsumed by the outer finding — copying an outer
-      // function must not double-count its nested closures.
-      if (
-        original.parent !== undefined &&
-        dup.parent !== undefined &&
-        original.parent !== dup.parent &&
-        original.parent.hash === dup.parent.hash
-      ) {
-        continue;
-      }
-      // One finding per duplicate pair, anchored at the LATER occurrence,
-      // message naming the original. Discriminator: structure hash + both
-      // file paths — a repeat pair within the same file collapses to one.
-      const discriminator = `${dup.hash}:${original.file}:${dup.file}`;
-      if (findings.has(discriminator)) continue;
-      findings.set(discriminator, {
+    const ordinals = new Map<DuplicateOccurrence, number>();
+    const perFile = new Map<string, number>();
+    for (const occurrence of group) {
+      const ordinal = perFile.get(occurrence.file) ?? 0;
+      ordinals.set(occurrence, ordinal);
+      perFile.set(occurrence.file, ordinal + 1);
+    }
+    for (let originalIndex = 0; originalIndex < group.length - 1; originalIndex += 1) {
+      const original = group[originalIndex]!;
+      for (const dup of group.slice(originalIndex + 1)) {
+        // A nested pair whose ENCLOSING function-likes are themselves the same
+        // duplicate pair is subsumed by the outer finding — copying an outer
+        // function must not double-count its nested closures.
+        if (
+          original.parent !== undefined &&
+          dup.parent !== undefined &&
+          original.parent !== dup.parent &&
+          original.parent.hash === dup.parent.hash
+        ) {
+          continue;
+        }
+        // One finding per occurrence pair, anchored at the later occurrence.
+        // Per-file occurrence ordinals distinguish repeated pairs while
+        // keeping persisted identity independent of line numbers.
+        const discriminator = `${dup.hash}:${original.file}#${ordinals.get(original)}:${dup.file}#${ordinals.get(dup)}`;
+        findings.push({
         findingId: computeFindingId({
           axiom: AXIOM,
           ruleId: RULE_DUPLICATE,
@@ -446,10 +453,11 @@ function duplicateFindings(occurrences: DuplicateOccurrence[]): Finding[] {
         confidence: 1,
         severity: "warning",
         enclosingSymbol: discriminator,
-      });
+        });
+      }
     }
   }
-  return [...findings.values()];
+  return findings;
 }
 
 // ---- cleanliness/unused-export (warning) -----------------------------------

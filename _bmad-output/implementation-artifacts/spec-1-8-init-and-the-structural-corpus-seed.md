@@ -114,6 +114,16 @@ warnings: [oversized] # accepted, not split: bootstrap + preflight/manifest halv
 
 Rejected: fanIn O(N·E) seed-build claim (fanIn is prebuilt-index O(result) — false premise); `history/*.jsonl` wiring "protects files that don't exist" (1.16 writes history/trends.jsonl this epic — deliberate prep, not dead wiring); NFR-3 e2e "measures the wrong thing" (full-CLI wall clock is a conservative superset of the preflight budget; a preflight-only timer would need production instrumentation the NFR doesn't justify).
 
+### 2026-07-31 — Independent follow-up review pass (stamp consumed)
+- reviewed_range: 360801a4..d6b71ae7, verified against HEAD
+- revalidated: 2026-08-01 — retained findings affect live history/knowledge paths; two presentation-only notes were removed
+- findings_fixed_and_verified_at_HEAD:
+  - audit_note: The bullets below preserve each original defect statement for audit continuity; they are fixed, not current findings. The adjacent remediation evidence names the HEAD verification surface.
+  - remediation_evidence: `packages/core/src/init/init.test.ts`; focused regression suite passed 2026-08-01.
+  - [medium] packages/core/src/init/wiring.ts:24 — `INIT_MARKER_FILES` (config/conventions/corpus-map) no longer covers all writers of union-merge-protected files: since 1.16 every review unconditionally appends committed `history/trends.jsonl` (pipeline.ts:727 `appendJsonl` auto-creates `history/`) on never-inited repos, so `checkGitWiring` returns [] (wiring.ts:60, no markers) while live committed history JSONL sits with no `merge=union` attribute — the exact warned consequence ("history JSONL will merge with conflicts") now happens silently; history-file presence should count as a marker (or the append should warn).
+  - [low] packages/core/src/init/init.ts:175 — an existing invalid conventions.yaml/corpus-map.yaml is silently reported "kept" with no warning, while an invalid kept config.yaml gets the "review will exit 2" warning (init.ts:141-147); same consequence class (knowledge-file degradation counts toward exit 2 at review) is invisible at init time.
+- forced-scrutiny areas verified fixed at HEAD: wiring warning gated on init markers with never-inited silence intact for the artifact-writer auto-created folder; ledger/corpus hashing yaml+schema-validated with invalid→real-hash+degradation, non-ENOENT→sentinel+read-error degradation, both feeding `runDegraded` → exit 2 (review-command.ts:208).
+
 ## Design Notes
 
 - Questionnaire-from-schema honesty: `configSchema`'s only user dimension is the per-axiom enforcement record (a `z.record` — nothing to enumerate generically). "Generated from the JSON Schema" is satisfied by sourcing the option VALUES from contracts and iterating the pipeline's known-axiom ids; a generic schema-walking form generator is machinery the data cannot justify (record it as the ponytail ceiling).

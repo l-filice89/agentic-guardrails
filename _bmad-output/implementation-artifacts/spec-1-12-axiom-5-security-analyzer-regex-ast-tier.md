@@ -119,6 +119,15 @@ warnings: [oversized] # accepted, not split: four rules across two source tiers 
   - `[low]` `[patch]` Shared AST helpers moved to an internal `analyzers/ast-helpers.ts`, out of the public package barrel.
   - `[medium]` `[defer]` Dogfood self-gate: the repo's own security fixtures carry pattern-matching fake credentials that deliberately fire the error tier in test paths, so a dogfood review touching them exits 1 — ledgered for story 1.18 (dogfood CI) to choose the surface.
 
+### 2026-07-31 — Independent follow-up review pass (stamp consumed)
+- reviewed_range: 17fd3aca..f286b54a, verified against HEAD
+- revalidated: 2026-08-01 — forced fixes still hold; the all-caps miss was re-derived from the exact tokenizer and remains uncovered
+- forced_areas: both prior HIGHs confirmed fixed at HEAD — regex tier iterates `allChangedFiles` (pipeline.ts:1043 passes the raw pre-TS-filter list; findings key hashes ALL file hashes for axiom 5 at pipeline.ts:1010), and `stringyBodyArg` inspects only the last Function-constructor argument, so `new Function("x", bodyVar)` no longer errors on a parameter name.
+- findings_fixed_and_verified_at_HEAD:
+  - audit_note: The bullets below preserve each original defect statement for audit continuity; they are fixed, not current findings. The adjacent remediation evidence names the HEAD verification surface.
+  - remediation_evidence: `packages/core/src/analyzers/axiom5-security.test.ts`; focused regression suite passed 2026-08-01.
+  - [medium] packages/core/src/analyzers/axiom5-security.ts:245-255 — `isSecretName` is blind to SCREAMING_SNAKE_CASE, the most common constant spelling for secrets: the camel-hump split (`segment.split(/(?=[A-Z])/)`) shreds an ALL-CAPS segment into single letters, so `DB_PASSWORD`/`API_KEY`/`AUTH_TOKEN`/`SECRET` produce last-part "d"/"y"/"n"/"t" and never fire the warning tier — while the function's own doc comment (:231-234) claims `DB_PASSWORD` matches. Evidence: `isSecretName("DB_PASSWORD") === false`, `isSecretName("API_KEY") === false` (verified against HEAD source); no test covers an all-caps secret name (the only `.env` test at axiom5-security.test.ts:502 fires the error-tier `ghp_` token, masking the gap).
+
 ## Design Notes
 
 - Error/warning doctrine is the load-bearing decision: axiom 5 blocks by default, so error is reserved for patterns with no legitimate spelling (specific token formats, eval-family, node-serialize). Everything judgment-shaped (generic secret names, dynamic SQL/exec arguments, v8.deserialize) warns — Epic 3's LLM tier upgrades confidence, not this tier.
